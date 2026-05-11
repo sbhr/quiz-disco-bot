@@ -17,3 +17,7 @@ class ScoreManager:
     def get_all_scores(self) -> dict:
         """Get all scores."""
         return self.scores
+
+    def reset_scores(self):
+        """Reset all scores."""
+        self.scores = {}

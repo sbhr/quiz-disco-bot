@@ -37,3 +37,7 @@ temp_question.mp3
 .Trashes
 ehthumbs.db
 Thumbs.db
+
+# Data files
+data/*.csv
+!data/questions.csv
