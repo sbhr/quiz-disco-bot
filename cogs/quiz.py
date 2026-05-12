@@ -92,6 +92,44 @@ class RecruitView(discord.ui.View):
         text = self.get_participants_text(interaction.guild)
         await interaction.response.edit_message(content=f"**クイズ参加者募集！**\n以下のボタンで参加・辞退を選んでください。\n\n**現在の参加予定者 ({len(self.cog.registered_participants)}名):**\n{text}", view=self)
 
+class GenreSelectView(discord.ui.View):
+    def __init__(self, cog, original_interaction, rule, value):
+        super().__init__(timeout=60)
+        self.cog = cog
+        self.original_interaction = original_interaction
+        self.rule = rule
+        self.value = value
+        
+        # ジャンル一覧を取得（「すべて」を追加）
+        genres = list(self.cog.question_store.questions_by_genre.keys())
+        genres = sorted(genres)
+        
+        # ボタンを追加（最大25個まで）
+        for genre_name in genres[:24]:
+            button = discord.ui.Button(label=genre_name, style=discord.ButtonStyle.primary)
+            button.callback = self.create_callback(genre_name)
+            self.add_item(button)
+            
+        all_button = discord.ui.Button(label="すべて", style=discord.ButtonStyle.success)
+        all_button.callback = self.create_callback("all")
+        self.add_item(all_button)
+
+    def create_callback(self, genre):
+        async def callback(interaction: discord.Interaction):
+            if interaction.user.id != self.original_interaction.user.id:
+                await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
+                return
+            
+            # ボタンを無効化
+            for item in self.children:
+                item.disabled = True
+            await interaction.response.edit_message(content=f"ジャンル **{genre}** が選択されました。クイズを開始します...", view=self)
+            
+            # クイズセッションを開始
+            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre)
+            
+        return callback
+
 class QuizCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -122,28 +160,39 @@ class QuizCog(commands.Cog):
         await interaction.response.send_message("クイズの強制終了リクエストを受け付けました。現在の問題が終わると終了します。")
 
     @app_commands.command(name="quiz", description="早押しクイズを開始します")
-    @app_commands.describe(rule="ルールの種類", value="問題数または目標ポイント", genre="出題するジャンル（CSVファイル名）。allですべて")
+    @app_commands.describe(rule="ルールの種類", value="問題数または目標ポイント", genre="出題するジャンル（省略するとボタンで選択）")
     @app_commands.choices(rule=[
         app_commands.Choice(name="N問先取", value="first_to_n"),
         app_commands.Choice(name="全N問", value="total_n")
     ])
-    async def quiz_start(self, interaction: discord.Interaction, rule: str = "first_to_n", value: int = 3, genre: str = "all"):
-        await interaction.response.defer()
-
+    async def quiz_start(self, interaction: discord.Interaction, rule: str = "first_to_n", value: int = 3, genre: str = None):
         if self.current_quiz_active:
-            await interaction.followup.send("既にクイズが進行中です！", ephemeral=True)
+            await interaction.response.send_message("既にクイズが進行中です！", ephemeral=True)
             return
-            
+
         if not interaction.user.voice:
-            await interaction.followup.send("ボイスチャンネルに参加してから実行してください。", ephemeral=True)
+            await interaction.response.send_message("ボイスチャンネルに参加してから実行してください。", ephemeral=True)
             return
-            
+
+        if genre is None:
+            view = GenreSelectView(self, interaction, rule, value)
+            await interaction.response.send_message("出題するジャンルを選んでください：", view=view)
+        else:
+            await interaction.response.defer()
+            await self.start_quiz_session(interaction, rule, value, genre)
+
+    async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str):
+        # ボイスチャンネルの取得
         vc = interaction.user.voice.channel
         
         try:
             voice_client = await self.voice_manager.join_channel(vc)
         except Exception as e:
-            await interaction.followup.send(f"ボイスチャンネルへの接続に失敗しました: {e}", ephemeral=True)
+            msg = f"ボイスチャンネルへの接続に失敗しました: {e}"
+            if interaction.response.is_done():
+                await interaction.followup.send(msg)
+            else:
+                await interaction.response.send_message(msg, ephemeral=True)
             return
             
         self.current_quiz_active = True
@@ -159,7 +208,12 @@ class QuizCog(commands.Cog):
         questions_asked = 0
         rule_text = f"{value} 問先取" if rule == "first_to_n" else f"全 {value} 問"
         genre_text = "すべて" if genre == "all" else genre
-        await interaction.followup.send(f"🎮 **クイズセッション開始！** (ルール: {rule_text} / ジャンル: {genre_text})")
+        
+        start_msg = f"🎮 **クイズセッション開始！** (ルール: {rule_text} / ジャンル: {genre_text})"
+        if interaction.response.is_done():
+            await interaction.followup.send(start_msg)
+        else:
+            await interaction.response.send_message(start_msg)
         
         while self.current_quiz_active:
             if self.force_stop:
