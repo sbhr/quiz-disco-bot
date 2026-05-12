@@ -325,7 +325,7 @@ class QuizCog(commands.Cog):
                         should_play_audio = False
                     continue
                 
-                is_correct = self.answer_validator.validate(user_answer, correct_answer)
+                is_correct = await self.answer_validator.validate(user_answer, correct_answer, question_text)
                 if is_correct:
                     self.score_manager.add_score(user.id, 1)
                     score = self.score_manager.get_score(user.id)

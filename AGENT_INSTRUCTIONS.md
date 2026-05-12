@@ -7,13 +7,15 @@
 - データセットから問題を読み込みます。
 - ボイスチャンネルでTTS（Text-to-Speech）を使用して問題を読み上げます。
 - 早押しの割り込み処理には、DiscordのUI View（ボタン）を使用します。
-- あいまい検索（Fuzzy Matching）を使用してテキストによる解答の正誤判定を行います。
+- あいまい判定（Fuzzy Matching）に加え、**Gemini API（AI）を使用したセマンティックな正誤判定**をサポートしています。
+- ジャンル選択をボタンUIで行うことができます。
 
 ## 技術スタック (Tech Stack)
 - **Python:** 3.8以上
 - **Discord フレームワーク:** `discord.py` (`[voice]` 依存関係を含む)
 - **TTS:** `gTTS`
 - **あいまい判定:** `thefuzz` (および `python-Levenshtein`)
+- **AI判定:** `google-genai` (Gemini API)
 - **音声再生:** FFmpeg (`discord.FFmpegPCMAudio` 経由)
 
 ## アーキテクチャとディレクトリ構成
@@ -23,10 +25,12 @@
   - `question.py`: (`QuestionStore`) CSVからの問題の読み込みと取得を処理します。
   - `score.py`: (`ScoreManager`) ユーザーのスコアを管理します（現在はオンメモリ）。
   - `voice.py`: (`VoiceManager`) TTSの生成と、FFmpegによるボイスチャンネルでの再生を処理します。
-  - `answer.py`: (`AnswerValidator` と `AnswerReceiver`) あいまい判定とテキスト入力の待機を処理します。
+  - `answer.py`: (`AnswerValidator` と `AnswerReceiver`) あいまい判定とテキスト入力の待機を処理します。AIバリデータと連携します。
+  - `ai_validator.py`: (`AIAnswerValidator`) Gemini APIを使用して、回答の意味的な正当性を検証します。
 - `/cogs/`: `discord.py` のCogの実装を含みます。
   - `quiz.py`: メインのQuizCog。
     - `RecruitView`: 参加者を募集し、`registered_participants` セットを更新するUI。
+    - `GenreSelectView`: クイズ開始前にジャンルをボタンで選択させるUI。
     - `FastestFingerView`: 早押しボタンと降参ボタンを管理するUI。
     - `/quiz` コマンド: セッションの開始とメインのゲームループを管理。
 - `/data/`: データストレージ（例: `questions.csv`）。
@@ -41,7 +45,12 @@
 1. **インタラクションのタイムアウト (超重要):** Discordでは、スラッシュコマンドのインタラクションに対して3秒以内に応答を返す必要があります。ボイスチャンネルの接続（`await voice_client.connect()`）はハンドシェイク段階で遅くなる可能性があり、3秒を超えることがよくあります。
    * **ルール:** ボイスチャンネルに参加するコマンドの**冒頭で必ず** `await interaction.response.defer()` を使用し、その後の返信には `await interaction.followup.send(...)` を使用してください。
 2. **モジュール性:** 複雑なロジックを直接 `cogs/quiz.py` や `main.py` に詰め込まないでください。新しいコア機能を追加する場合は、`/core/` にマネージャークラスを作成または拡張してください。
-3. **環境変数:** すべてのシークレットとトークンは**必ず** `.env` から読み込む必要があります。トークンを絶対にハードコードしないでください。
-4. **あいまい判定のしきい値:** `thefuzz` の合格しきい値は現在 `80` に設定されています。許容されるべき打ち間違いでテストが失敗する場合は、`AnswerValidator` がインスタンス化されている `cogs/quiz.py` でこの値を調整することを検討してください。
+4. **ハイブリッド回答判定:** 正誤判定は `core/answer.py` で行われます。
+   - 文字一致度が非常に高い場合は、計算コスト削減のためAIを通さず即座に正解とします。
+   - 一致度が低い、あるいは文字種が異なる（ひらがな vs 漢字など）場合は、Gemini APIを使用して意味的な検証を行います。
+   - 無料枠のクォータ（1分間15回リクエスト）を尊重するため、このハイブリッドアプローチは必須です。
+5. **環境変数:** すべてのシークレットとトークンは**必ず** `.env` から読み込む必要があります。トークンを絶対にハードコードしないでください。
+   - `DISCORD_BOT_TOKEN`, `GEMINI_API_KEY` が必須です。
+6. **あいまい判定のしきい値:** `thefuzz` の合格しきい値は現在 `85` に設定されています。許容されるべき打ち間違いでテストが失敗する場合は、`AnswerValidator` がインスタンス化されている `cogs/quiz.py` でこの値を調整することを検討してください。
 5. **タイムアウト制御 (読み上げ優先):** クイズのタイムアウトは「読み上げが完了した時点から」開始されるように設計されています。`QuizCog` 内で `voice_client.is_playing()` を監視し、再生終了後に7秒間のカウントダウンを実行します。誰かがボタンを押した際や降参した際の割り込み処理を正確に行う必要があります。
 6. **参加者管理:** `/recruit` コマンドによって事前に参加者を募ることができます。`registered_participants` が空の場合はVCにいる全員、そうでない場合は登録者のみに回答権が与えられます。

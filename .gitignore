@@ -28,6 +28,7 @@ share/python-wheels/
 
 # Bot temp files
 temp_question.mp3
+temp/
 
 # OS generated files
 .DS_Store

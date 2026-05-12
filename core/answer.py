@@ -2,21 +2,30 @@ from thefuzz import fuzz
 import discord
 import asyncio
 
+from core.ai_validator import AIAnswerValidator
+
 class AnswerValidator:
-    def __init__(self, threshold: int = 80):
+    def __init__(self, threshold: int = 85):
         """
-        threshold: The similarity score (0-100) required to pass.
-        80 is usually a good starting point to allow 1 character difference in short strings.
+        threshold: 85以上のスコアは即正解とみなします。
+        それ以下（かつ一定以上）の場合はAIに問い合わせます。
         """
         self.threshold = threshold
+        self.ai_validator = AIAnswerValidator()
 
-    def validate(self, user_answer: str, correct_answer: str) -> bool:
+    async def validate(self, user_answer: str, correct_answer: str, question: str = "") -> bool:
         """
-        Compares user_answer with correct_answer using fuzzy matching.
+        Fuzzy matching と AI を組み合わせて正誤判定を行います。
         """
-        # fuzz.ratio computes the standard Levenshtein distance similarity ratio
+        # 1. 文字ベースの判定 (Fuzzy matching)
         score = fuzz.ratio(user_answer.lower(), correct_answer.lower())
-        return score >= self.threshold
+        
+        # スコアが非常に高い場合は即正解
+        if score >= self.threshold:
+            return True
+            
+        # 判定が微妙な場合または文字種が異なる場合のみAIに問い合わせる (ハイブリッド判定)
+        return await self.ai_validator.validate(question, correct_answer, user_answer)
 
 class AnswerReceiver:
     def __init__(self, bot):
