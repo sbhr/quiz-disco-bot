@@ -22,6 +22,8 @@ class AnswerValidator:
         
         # スコアが非常に高い場合は即正解
         if score >= self.threshold:
+            # ログ出力 (Fuzzy matchingで正解した場合)
+            self.ai_validator._log_result(question, correct_answer, user_answer, True, f"Fuzzy({score})")
             return True
             
         # 判定が微妙な場合または文字種が異なる場合のみAIに問い合わせる (ハイブリッド判定)
