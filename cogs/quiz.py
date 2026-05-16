@@ -123,7 +123,9 @@ class GenreSelectView(discord.ui.View):
             # ボタンを無効化
             for item in self.children:
                 item.disabled = True
-            await interaction.response.edit_message(content=f"ジャンル **{genre}** が選択されました。クイズを開始します...", view=self)
+            # ルールのテキスト表示用
+            rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
+            await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{genre}** で開始します...", view=self)
             
             # クイズセッションを開始
             await self.cog.start_quiz_session(interaction, self.rule, self.value, genre)
@@ -162,7 +164,7 @@ class QuizCog(commands.Cog):
     @app_commands.command(name="quiz", description="早押しクイズを開始します")
     @app_commands.describe(rule="ルールの種類", value="問題数または目標ポイント", genre="出題するジャンル（省略するとボタンで選択）")
     @app_commands.choices(rule=[
-        app_commands.Choice(name="N問先取", value="first_to_n"),
+        app_commands.Choice(name="目標ポイント先取", value="first_to_n"),
         app_commands.Choice(name="全N問", value="total_n")
     ])
     async def quiz_start(self, interaction: discord.Interaction, rule: str = "first_to_n", value: int = 3, genre: str = None):
@@ -182,6 +184,9 @@ class QuizCog(commands.Cog):
             await self.start_quiz_session(interaction, rule, value, genre)
 
     async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str):
+        # デバッグログ: 受信したパラメータを確認
+        print(f"DEBUG: Starting quiz session with rule={rule}, value={value}, genre={genre}")
+        
         # ボイスチャンネルの取得
         vc = interaction.user.voice.channel
         
