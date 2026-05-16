@@ -8,8 +8,9 @@ from core.voice import VoiceManager
 from core.answer import AnswerReceiver, AnswerValidator
 
 class FastestFingerView(discord.ui.View):
-    def __init__(self, timeout: float | None, answered_users: set, allowed_users: set):
+    def __init__(self, cog, timeout: float | None, answered_users: set, allowed_users: set):
         super().__init__(timeout=timeout)
+        self.cog = cog
         self.pressed_user = None
         self.pressed = False
         self.answered_users = answered_users
@@ -59,6 +60,16 @@ class FastestFingerView(discord.ui.View):
             self.stop()
         else:
             await interaction.response.send_message(f"🏳️ **{interaction.user.display_name}** さんが降参しました。")
+
+    @discord.ui.button(label="終了する", style=discord.ButtonStyle.secondary, emoji="⏹️")
+    async def stop_button_callback(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id not in self.allowed_users:
+            await interaction.response.send_message("参加者以外はクイズを終了できません。", ephemeral=True)
+            return
+
+        self.cog.force_stop = True
+        await interaction.response.send_message(f"🛑 **{interaction.user.display_name}** さんがクイズの終了をリクエストしました。")
+        self.stop()
 
 class RecruitView(discord.ui.View):
     def __init__(self, cog):
@@ -248,7 +259,7 @@ class QuizCog(commands.Cog):
                     break
 
                 # Show button (timeout=None disables UI timeout)
-                view = FastestFingerView(timeout=None, answered_users=answered_users, allowed_users=allowed_users)
+                view = FastestFingerView(self, timeout=None, answered_users=answered_users, allowed_users=allowed_users)
                 msg = await interaction.channel.send("分かったら早押しボタンを押してください！", view=view)
                 
                 # Play audio
