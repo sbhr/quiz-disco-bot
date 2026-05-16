@@ -1,19 +1,21 @@
 import os
 import discord
-from gtts import gTTS
+import edge_tts
 import asyncio
 
 class VoiceManager:
     def __init__(self, bot):
         self.bot = bot
         self.audio_file_path = "temp_question.mp3"
+        # 日本語の女性の声（Nanami）を使用。他にも Keita (男性) などが選択可能。
+        self.voice_name = "ja-JP-NanamiNeural"
 
     async def join_channel(self, channel: discord.VoiceChannel) -> discord.VoiceClient:
-        """Join a voice channel."""
+        """ボイスチャンネルに参加する"""
         if not channel:
             return None
         
-        # Check if already connected
+        # 既に接続済みか確認
         voice_client = discord.utils.get(self.bot.voice_clients, guild=channel.guild)
         if voice_client and voice_client.is_connected():
             if voice_client.channel != channel:
@@ -23,20 +25,16 @@ class VoiceManager:
             return await channel.connect()
 
     async def leave_channel(self, guild: discord.Guild):
-        """Leave the voice channel."""
+        """ボイスチャンネルから退出する"""
         voice_client = discord.utils.get(self.bot.voice_clients, guild=guild)
         if voice_client and voice_client.is_connected():
             await voice_client.disconnect()
 
-    def generate_tts(self, text: str, lang: str = 'ja'):
-        """Generate TTS audio file."""
-        tts = gTTS(text=text, lang=lang)
-        tts.save(self.audio_file_path)
-
     async def play_audio(self, voice_client: discord.VoiceClient, text: str):
-        """Generate TTS and play it in the voice channel."""
-        # Ensure we run the blocking gTTS generation in a thread to not block event loop
-        await asyncio.to_thread(self.generate_tts, text)
+        """edge-ttsで音声を生成し、ボイスチャンネルで再生する"""
+        # 音声生成 (edge-ttsは非同期対応)
+        communicate = edge_tts.Communicate(text, self.voice_name)
+        await communicate.save(self.audio_file_path)
         
         if voice_client.is_playing():
             voice_client.stop()
@@ -45,12 +43,12 @@ class VoiceManager:
         voice_client.play(audio_source)
 
     def stop_audio(self, voice_client: discord.VoiceClient):
-        """Stop currently playing audio."""
+        """再生中の音声を停止する"""
         if voice_client and voice_client.is_playing():
             voice_client.stop()
             
     def cleanup(self):
-        """Remove temporary audio file."""
+        """一時音声ファイルを削除する"""
         if os.path.exists(self.audio_file_path):
             try:
                 os.remove(self.audio_file_path)

@@ -27,7 +27,17 @@ class AnswerValidator:
             return True
             
         # 判定が微妙な場合または文字種が異なる場合のみAIに問い合わせる (ハイブリッド判定)
-        return await self.ai_validator.validate(question, correct_answer, user_answer)
+        is_correct, is_error = await self.ai_validator.validate(question, correct_answer, user_answer)
+        
+        if is_error:
+            # AIがエラー（クォータ制限など）の場合は、Fuzzy Matchingのしきい値を下げてフォールバックする
+            # partial_ratioを使用して、部分一致でも高ければ正解とする
+            fallback_score = fuzz.partial_ratio(user_answer.lower(), correct_answer.lower())
+            if fallback_score >= 80:
+                self.ai_validator._log_result(question, correct_answer, user_answer, True, f"AI_Fallback_Fuzzy({fallback_score})")
+                return True
+        
+        return is_correct
 
 class AnswerReceiver:
     def __init__(self, bot):

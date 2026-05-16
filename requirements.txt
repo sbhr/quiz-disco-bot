@@ -1,6 +1,6 @@
 discord.py[voice]
 python-dotenv
-gTTS
+edge-tts
 thefuzz
 python-Levenshtein
 google-genai

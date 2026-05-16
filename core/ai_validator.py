@@ -64,13 +64,13 @@ class AIAnswerValidator:
             # ログ出力 (成功)
             self._log_result(question, correct_answer, user_answer, is_correct, "AI")
             
-            return is_correct
+            return is_correct, False
         except Exception as e:
             error_msg = f"Error: {str(e)}"
             print(f"Error during AI validation: {error_msg}")
             # ログ出力 (エラー)
             self._log_result(question, correct_answer, user_answer, False, f"AI_ERROR ({error_msg})")
-            return False
+            return False, True
 
     def _log_result(self, question: str, correct_answer: str, user_answer: str, result: bool, method: str):
         """
