@@ -45,3 +45,6 @@ data/*.csv
 
 # Logs
 logs/
+
+# Database files
+quiz.db

@@ -2,6 +2,7 @@ import os
 import discord
 import edge_tts
 import asyncio
+from gtts import gTTS
 
 class VoiceManager:
     def __init__(self, bot):
@@ -31,10 +32,16 @@ class VoiceManager:
             await voice_client.disconnect()
 
     async def play_audio(self, voice_client: discord.VoiceClient, text: str):
-        """edge-ttsで音声を生成し、ボイスチャンネルで再生する"""
-        # 音声生成 (edge-ttsは非同期対応)
-        communicate = edge_tts.Communicate(text, self.voice_name)
-        await communicate.save(self.audio_file_path)
+        """edge-ttsで音声を生成し、ボイスチャンネルで再生する（失敗時はgTTSにフォールバック）"""
+        try:
+            # 音声生成 (edge-ttsは非同期対応)
+            communicate = edge_tts.Communicate(text, self.voice_name)
+            await communicate.save(self.audio_file_path)
+        except Exception as e:
+            print(f"edge-tts error: {e}. Falling back to gTTS...")
+            # gTTSは同期関数なのでスレッドで実行するか、短時間なので直接実行
+            tts = gTTS(text=text, lang='ja')
+            tts.save(self.audio_file_path)
         
         if voice_client.is_playing():
             voice_client.stop()
