@@ -14,7 +14,7 @@
 ## 技術スタック (Tech Stack)
 - **Python:** 3.8以上
 - **Discord フレームワーク:** `discord.py` (`[voice]` 依存関係を含む)
-- **TTS:** `edge-tts` (高速・高音質なニューラル音声)
+- **TTS:** `edge-tts` (高速・高音質なニューラル音声)。エラー時は自動で `gTTS` にフォールバックします。
 - **データベース:** `sqlite3` (生涯成績の保存用)
 - **あいまい判定:** `thefuzz` (および `python-Levenshtein`)
 - **AI判定:** `google-genai` (Gemini API)
@@ -27,7 +27,7 @@
   - `session.py`: (`QuizSession`) **重要** クイズのメインループとゲーム状態を管理します。Cogからロジックが切り離されています。
   - `question.py`: (`QuestionStore`) CSVからの問題の読み込みと取得を処理します。
   - `score.py`: (`ScoreManager`) ユーザーのスコアを管理します。SQLiteによる永続化をサポートしています。
-  - `voice.py`: (`VoiceManager`) `edge-tts` による音声生成と、FFmpegによる再生を処理します。
+  - `voice.py`: (`VoiceManager`) `edge-tts` (または `gTTS`) による音声生成と、FFmpegによる再生を処理します。
   - `answer.py`: (`AnswerValidator` と `AnswerReceiver`) あいまい判定とテキスト入力の待機を処理します。AIバリデータと連携します。
   - `ai_validator.py`: (`AIAnswerValidator`) Gemini APIを使用して正誤を検証します。クォータ制限時のエラーハンドリングも行います。
 - `/cogs/`: `discord.py` のCogの実装。
