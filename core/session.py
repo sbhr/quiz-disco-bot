@@ -7,13 +7,14 @@ from core.voice import VoiceManager
 from core.answer import AnswerReceiver, AnswerValidator
 
 class QuizSession:
-    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0):
+    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True):
         self.cog = cog
         self.interaction = interaction
         self.rule = rule
         self.value = value
         self.genre = genre
         self.penalty = penalty
+        self.unique = unique
         
         # マネージャー類は Cog から参照
         self.voice_manager = cog.voice_manager
@@ -43,7 +44,6 @@ class QuizSession:
                 await self.interaction.response.send_message(msg, ephemeral=True)
             return
 
-        self.question_store.reset_used_questions()
         self.score_manager.reset_scores()
         
         if self.cog.registered_participants:
@@ -66,7 +66,15 @@ class QuizSession:
                 await self.interaction.channel.send("クイズが強制終了されました。")
                 break
                 
-            question_data = self.question_store.get_random_question(self.genre)
+            question_data = self.question_store.get_random_question(self.genre, self.unique)
+            if question_data and question_data.get('_was_reset', False):
+                reset_embed = discord.Embed(
+                    title="💡 出題履歴のリセット",
+                    description=f"ジャンル **{genre_text}** のすべての問題が出尽くしたため、出題履歴をリセットして最初から出題します！",
+                    color=discord.Color.blue()
+                )
+                await self.interaction.channel.send(embed=reset_embed)
+
             if not question_data:
                 await self.interaction.channel.send(f"出題できる問題がなくなりました！（ジャンル: {genre_text}）クイズを終了します。")
                 break
