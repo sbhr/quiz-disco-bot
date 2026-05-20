@@ -107,6 +107,7 @@ class QuizSession:
                         description=f"正解は **{correct_answer}** でした。",
                         color=discord.Color.red()
                     )
+                    embed.add_field(name="問題文", value=question_text, inline=False)
                     if explanation:
                         embed.add_field(name="解説", value=explanation)
                     await self.interaction.channel.send(embed=embed)
@@ -169,6 +170,7 @@ class QuizSession:
                         description=f"正解は **{correct_answer}** でした。",
                         color=discord.Color.light_grey()
                     )
+                    embed.add_field(name="問題文", value=question_text, inline=False)
                     if explanation:
                         embed.add_field(name="解説", value=explanation)
                     await self.interaction.channel.send(embed=embed)
@@ -196,6 +198,7 @@ class QuizSession:
                             description=f"解答時間切れです！ 正解は **{correct_answer}** でした。",
                             color=discord.Color.red()
                         )
+                        embed.add_field(name="問題文", value=question_text, inline=False)
                         if explanation:
                             embed.add_field(name="解説", value=explanation)
                         await self.interaction.channel.send(embed=embed)
@@ -219,6 +222,7 @@ class QuizSession:
                         description=f"**{user.display_name}** さん、お見事！\n\n正解: **{correct_answer}**",
                         color=discord.Color.green()
                     )
+                    embed.add_field(name="問題文", value=question_text, inline=False)
                     embed.add_field(name="獲得ポイント", value="1 pt", inline=True)
                     embed.add_field(name="現在の合計", value=f"{score} pts", inline=True)
                     if explanation:
@@ -238,6 +242,7 @@ class QuizSession:
                             description=f"不正解！ 正解は **{correct_answer}** でした。",
                             color=discord.Color.red()
                         )
+                        embed.add_field(name="問題文", value=question_text, inline=False)
                         if explanation:
                             embed.add_field(name="解説", value=explanation)
                         await self.interaction.channel.send(embed=embed)
@@ -280,8 +285,8 @@ class QuizSession:
             if session_ended:
                 break
                 
-            await self.interaction.channel.send("次の問題まで 3秒...")
-            await asyncio.sleep(3)
+            await self.interaction.channel.send("次の問題まで 5秒...")
+            await asyncio.sleep(5)
 
         # セッション終了
         self.is_active = False
