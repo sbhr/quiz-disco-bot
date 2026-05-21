@@ -240,8 +240,17 @@ class QuizCog(commands.Cog):
 
 
     async def end_quiz_session(self, interaction: discord.Interaction):
+        # 1. セッションクリア前に参加ユーザーを抽出
+        allowed_users = set()
+        if self.current_session:
+            allowed_users = self.current_session.allowed_users.copy()
+
         self.current_quiz_active = False
         self.current_session = None
+        
+        # 2. 参加状態の継続
+        if allowed_users:
+            self.registered_participants = allowed_users.copy()
         
         scores = self.score_manager.get_all_scores()
         if scores:
@@ -256,6 +265,14 @@ class QuizCog(commands.Cog):
             await interaction.channel.send(embed=embed)
         else:
             await interaction.channel.send("🏁 **クイズ終了！**（スコア記録はありませんでした）")
+
+        # 3. 募集パネルを自動表示
+        view = RecruitView(self)
+        text = view.get_participants_text(interaction.guild)
+        await interaction.channel.send(
+            content=f"**クイズ参加者募集！**\n以下のボタンで参加・辞退を選んでください。\n\n**現在の参加予定者 ({len(self.registered_participants)}名):**\n{text}",
+            view=view
+        )
 
 async def setup(bot):
     await bot.add_cog(QuizCog(bot))
