@@ -64,7 +64,7 @@ class AnswerReceiver:
         except asyncio.TimeoutError:
             return None
 
-    async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0, check_cancel=None) -> str:
+    async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0, check_cancel=None, elapsed_ms=None) -> str:
         """
         ユーザーの音声を最大 timeout 秒間録音し、録音された一時ファイルパス (.wav) を返します。
         話し終わったボタンが押された場合、または外部キャンセルフラグが立った場合、早期に録音を終了してファイルパスを返します。
@@ -80,7 +80,8 @@ class AnswerReceiver:
 
         # 音声回答完了ボタン付きのViewを送信
         view = VoiceAnswerDoneView(user, timeout=timeout)
-        msg_text = f"🔔 **{user.display_name}** さん、音声で回答してください！ (最大 {int(timeout)} 秒間録音します)\n話し終わったら下のボタンを押すか、そのままお待ちください。"
+        time_str = f" (早押しタイム: **{elapsed_ms}ms**)" if elapsed_ms is not None else ""
+        msg_text = f"🔔 **{user.display_name}** さんが押しました！{time_str}\n音声で回答してください！ (最大 {int(timeout)} 秒間録音します)\n話し終わったら下のボタンを押すか、そのままお待ちください。"
         done_msg = await channel.send(msg_text, view=view)
         view.message = done_msg
 

@@ -30,6 +30,8 @@ class QuizSession:
         self.questions_asked = 0
         self.allowed_users = set()
         self.frozen_users = {}  # {user_id: timestamp_until_unfrozen}
+        self.question_start_time = 0.0
+        self.correct_reaction_times = []  # [(user_id, elapsed_ms, question_number)]
 
     async def run(self):
         """クイズセッションのメインループ"""
@@ -124,6 +126,7 @@ class QuizSession:
                     # 音声再生
                     if should_play_audio:
                         try:
+                            self.question_start_time = time.time()
                             await self.voice_manager.play_audio(voice_client, f"問題。{question_text}")
                         except Exception as e:
                             await self.interaction.channel.send(f"音声の再生に失敗しました。({e})")
@@ -184,19 +187,27 @@ class QuizSession:
                     self.voice_manager.stop_audio(voice_client)
                     user = view.pressed_user
                     
+                    # 早押し反応速度（ミリ秒）の算出
+                    pressed_time = getattr(view, 'pressed_time', time.time())
+                    if self.question_start_time > 0.0:
+                        elapsed_ms = max(0, int((pressed_time - self.question_start_time) * 1000))
+                    else:
+                        elapsed_ms = 0
+                    
                     if self.voice_answer:
                         # 音声回答モード
                         # 1. 解答者以外のサーバーミュート処理 (VoiceManager へ移行)
                         muted_members = await self.voice_manager.mute_all_except(vc, user)
 
                         try:
-                            # 2. 録音処理 (AnswerReceiver にカプセル化、強制終了チェックを渡す)
+                            # 2. 録音処理 (AnswerReceiver にカプセル化、強制終了チェックと反応時間を渡す)
                             temp_wav = await self.answer_receiver.wait_for_voice_answer(
                                 self.interaction.channel, 
                                 voice_client, 
                                 user, 
                                 timeout=8.0,
-                                check_cancel=lambda: self.force_stop or self.cog.force_stop
+                                check_cancel=lambda: self.force_stop or self.cog.force_stop,
+                                elapsed_ms=elapsed_ms
                             )
                         finally:
                             # 3. サーバーミュート解除 (VoiceManager へ移行)
@@ -224,7 +235,7 @@ class QuizSession:
                             user_answer = None
                     else:
                         # テキスト解答モード
-                        await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ 10秒以内にテキストで解答を送信してください。")
+                        await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ (早押しタイム: **{elapsed_ms}ms**)\n10秒以内にテキストで解答を送信してください。")
                         # 解答待ち
                         user_answer = await self.answer_receiver.wait_for_answer(self.interaction.channel, user, timeout=10.0)
                         is_correct = False # 後続で更新されるためダミー値
@@ -261,6 +272,7 @@ class QuizSession:
                     if is_correct:
                         self.score_manager.add_score(user.id, 1)
                         score = self.score_manager.get_score(user.id)
+                        self.correct_reaction_times.append((user.id, elapsed_ms, self.questions_asked))
                         
                         embed = discord.Embed(
                             title="✨ 正解！",
@@ -332,6 +344,17 @@ class QuizSession:
                     
                 await self.interaction.channel.send("次の問題まで 5秒...")
                 await asyncio.sleep(5)
+
+            # 神押し賞の発表
+            if self.correct_reaction_times:
+                fastest = min(self.correct_reaction_times, key=lambda x: x[1])
+                uid, ms, q_num = fastest
+                embed = discord.Embed(
+                    title="⚡ 神押し賞（最速正解記録）",
+                    description=f"🏆 <@{uid}> さん\n第 {q_num} 問にて、わずか **{ms}ms** の超反応で正解しました！",
+                    color=discord.Color.gold()
+                )
+                await self.interaction.channel.send(embed=embed)
         except Exception as e:
             print(f"Unexpected error in QuizSession.run: {e}")
             import traceback

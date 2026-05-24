@@ -43,6 +43,7 @@ class FastestFingerView(discord.ui.View):
             
         self.pressed = True
         self.pressed_user = interaction.user
+        self.pressed_time = time.time()
         
         # 全ボタンを無効化
         for child in self.children:
