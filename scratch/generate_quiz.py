@@ -146,10 +146,10 @@ class QuizGenerator:
         
         return question, True, ""
 
-    def generate_precise_quiz_set(self, theme: str, num_questions: int) -> list[QuizQuestion]:
+    def generate_precise_quiz_set(self, theme: str, num_questions: int, initial_excludes: list[str] = None) -> list[QuizQuestion]:
         """テーマに沿った高精度なクイズセットを指定された問題数分、順次生成・監査します"""
         verified_questions = []
-        exclude_list = []
+        exclude_list = list(initial_excludes) if initial_excludes else []
         
         print(f"\n🚀 クイズ自動生成スタート (テーマ: 「{theme}」 / 生成目標: {num_questions} 問)")
         print("==================================================")
@@ -211,23 +211,64 @@ def main():
     csv_filename = f"{args.theme}.csv"
     csv_path = os.path.join(output_dir, csv_filename)
 
+    # 既存のCSVファイルがあるかチェックして読み込み、重複を回避する
+    exclude_list = []
+    existing_count = 0
+    if os.path.exists(csv_path) and os.path.getsize(csv_path) > 0:
+        try:
+            with open(csv_path, mode='r', encoding='utf-8') as f:
+                # ヘッダー行があるか確認
+                first_line = f.readline()
+                f.seek(0)
+                if first_line and "question" in first_line.lower() and "answer" in first_line.lower():
+                    reader = csv.DictReader(f)
+                else:
+                    reader = csv.DictReader(f, fieldnames=['question', 'answer', 'explanation'])
+                
+                for row in reader:
+                    q_text = row.get('question', '')
+                    ans_text = row.get('answer', '')
+                    if q_text == "question" and ans_text == "answer":
+                        continue
+                    if q_text and ans_text:
+                        exclude_list.append(ans_text)
+                        exclude_list.append(q_text[:30]) # 問題文の重複防止用
+            existing_count = len(exclude_list) // 2
+            print(f"📂 既存のファイルを検出しました: {csv_path} (既存の問題数: {existing_count} 問)")
+            print(f"   既存の問題や答えと重複しないように、新規に {args.num} 問を追加生成します。")
+        except Exception as e:
+            print(f"⚠️ 既存ファイルの読み込みに失敗しました（新規作成として扱います）: {e}")
+
     # クイズ生成の実行
     generator = QuizGenerator()
-    quiz_set = generator.generate_precise_quiz_set(args.theme, args.num)
+    quiz_set = generator.generate_precise_quiz_set(args.theme, args.num, initial_excludes=exclude_list)
 
     if not quiz_set:
         print("クイズ問題の生成に失敗しました。")
         sys.exit(1)
 
-    # CSVファイルへの書き出し
-    print(f"\n💾 ファイルに保存中: {csv_path}")
+    # CSVファイルへの書き出し (追記モード)
+    file_exists = os.path.exists(csv_path) and os.path.getsize(csv_path) > 0
+    mode = "a" if file_exists else "w"
+
+    if file_exists:
+        print(f"\n💾 ファイルに追記保存中: {csv_path}")
+    else:
+        print(f"\n💾 新規ファイルに保存中: {csv_path}")
+
     try:
-        with open(csv_path, "w", encoding="utf-8", newline="") as f:
+        with open(csv_path, mode, encoding="utf-8", newline="") as f:
             writer = csv.writer(f)
-            writer.writerow(["question", "answer", "explanation"])
+            if not file_exists:
+                writer.writerow(["question", "answer", "explanation"])
             for q in quiz_set:
                 writer.writerow([q.question, q.answer, q.explanation])
-        print(f"✨ 正常に保存されました！既存のBot上で `/quiz` コマンドを実行し、ジャンル「{args.theme}」を選択して遊べます！")
+        
+        if file_exists:
+            print(f"✨ 既存のファイルに正常に {args.num} 問が追記されました！(総問題数: {existing_count + len(quiz_set)} 問)")
+        else:
+            print(f"✨ 正常に新規作成・保存されました！")
+        print(f"👉 既存のBot上で `/quiz` コマンドを実行し、ジャンル「{args.theme}」を選択して遊べます！")
     except Exception as e:
         print(f"ファイルの保存に失敗しました: {e}")
         sys.exit(1)
