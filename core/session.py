@@ -8,13 +8,14 @@ from core.voice import VoiceManager
 from core.answer import AnswerReceiver, AnswerValidator
 
 class QuizSession:
-    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True, voice_answer: bool = False):
+    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty_type: str = "none", penalty_value: int = 0, unique: bool = True, voice_answer: bool = False):
         self.cog = cog
         self.interaction = interaction
         self.rule = rule
         self.value = value
         self.genre = genre
-        self.penalty = penalty
+        self.penalty_type = penalty_type
+        self.penalty_value = penalty_value
         self.unique = unique
         self.voice_answer = voice_answer
         
@@ -29,7 +30,9 @@ class QuizSession:
         self.force_stop = False
         self.questions_asked = 0
         self.allowed_users = set()
-        self.frozen_users = {}  # {user_id: timestamp_until_unfrozen}
+        self.frozen_users = {}  # {user_id: timestamp_until_unfrozen or question_number_until_unfrozen}
+        self.mistake_counts = {}  # {user_id: count_of_mistakes}
+        self.disqualified_users = set()  # {user_id, ...}
         self.question_start_time = 0.0
         self.correct_reaction_times = []  # [(user_id, elapsed_ms, question_number)]
 
@@ -58,7 +61,18 @@ class QuizSession:
                 
             rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
             genre_text = "すべて" if self.genre == "all" else self.genre
-            penalty_text = f" (お手つきペナルティ: {self.penalty}秒)" if self.penalty > 0 else ""
+            
+            # ペナルティ設定メッセージの生成
+            if self.penalty_type == "none":
+                penalty_text = ""
+            elif self.penalty_type == "time":
+                penalty_text = f" (お手つきペナルティ: {self.penalty_value}秒)"
+            elif self.penalty_type == "skip":
+                penalty_text = f" (お手つきペナルティ: 次の {self.penalty_value} 問休み)"
+            elif self.penalty_type == "disqualify":
+                penalty_text = f" (お手つきペナルティ: {self.penalty_value}回で失格)"
+            else:
+                penalty_text = ""
             
             start_msg = f"🎮 **クイズセッション開始！** (ルール: {rule_text} / ジャンル: {genre_text}{penalty_text})"
             if self.interaction.response.is_done():
@@ -96,12 +110,29 @@ class QuizSession:
                 )
                 embed.add_field(name="ジャンル", value=genre_text, inline=True)
                 embed.add_field(name="現在の状況", value=f"進行中: {self.questions_asked}問目", inline=True)
-                if self.penalty > 0:
-                    embed.set_footer(text=f"お手つきペナルティ: {self.penalty}秒")
+                
+                # ペナルティ表示のフッター設定
+                if self.penalty_type == "time" and self.penalty_value > 0:
+                    embed.set_footer(text=f"お手つきペナルティ: {self.penalty_value}秒休み")
+                elif self.penalty_type == "skip" and self.penalty_value > 0:
+                    embed.set_footer(text=f"お手つきペナルティ: 次の {self.penalty_value} 問休み")
+                elif self.penalty_type == "disqualify" and self.penalty_value > 0:
+                    embed.set_footer(text=f"お手つきペナルティ: {self.penalty_value}回間違いで失格")
                 
                 await self.interaction.channel.send(embed=embed)
                 
-                answered_users = set()
+                # 全員が失格になっているか確認
+                active_users = self.allowed_users - self.disqualified_users
+                if len(self.allowed_users) > 0 and len(active_users) == 0:
+                    embed_all_disqualified = discord.Embed(
+                        title="🚨 クイズ終了",
+                        description="参加者全員が失格となったため、クイズセッションを終了します！",
+                        color=discord.Color.red()
+                    )
+                    await self.interaction.channel.send(embed=embed_all_disqualified)
+                    break
+                
+                answered_users = self.disqualified_users.copy()
                 should_play_audio = True
                 is_repeat = False
                 
@@ -245,8 +276,23 @@ class QuizSession:
                     if not user_answer:
                         answered_users.add(user.id)
                         # ペナルティ設定がある場合
-                        if self.penalty > 0:
-                            self.frozen_users[user.id] = time.time() + self.penalty
+                        if self.penalty_type == "time" and self.penalty_value > 0:
+                            self.frozen_users[user.id] = time.time() + self.penalty_value
+                        elif self.penalty_type == "skip" and self.penalty_value > 0:
+                            self.frozen_users[user.id] = self.questions_asked + self.penalty_value
+                        elif self.penalty_type == "disqualify" and self.penalty_value > 0:
+                            self.mistake_counts[user.id] = self.mistake_counts.get(user.id, 0) + 1
+                            current_mistakes = self.mistake_counts[user.id]
+                            if current_mistakes >= self.penalty_value:
+                                self.disqualified_users.add(user.id)
+                                embed_disq = discord.Embed(
+                                    title="❌ プレイヤー失格",
+                                    description=f"**{user.display_name}** さんは {self.penalty_value} 回不正解（またはタイムアウト）となったため、**失格・脱落**となりました！",
+                                    color=discord.Color.red()
+                                )
+                                await self.interaction.channel.send(embed=embed_disq)
+                            else:
+                                await self.interaction.channel.send(f"⚠️ **{user.display_name}** さんはお手つきしました！ (お手つき回数: {current_mistakes}/{self.penalty_value})")
 
                         if len(self.allowed_users) > 0 and len(answered_users) >= len(self.allowed_users):
                             embed = discord.Embed(
@@ -292,8 +338,23 @@ class QuizSession:
                     else:
                         answered_users.add(user.id)
                         # ペナルティ設定がある場合
-                        if self.penalty > 0:
-                            self.frozen_users[user.id] = time.time() + self.penalty
+                        if self.penalty_type == "time" and self.penalty_value > 0:
+                            self.frozen_users[user.id] = time.time() + self.penalty_value
+                        elif self.penalty_type == "skip" and self.penalty_value > 0:
+                            self.frozen_users[user.id] = self.questions_asked + self.penalty_value
+                        elif self.penalty_type == "disqualify" and self.penalty_value > 0:
+                            self.mistake_counts[user.id] = self.mistake_counts.get(user.id, 0) + 1
+                            current_mistakes = self.mistake_counts[user.id]
+                            if current_mistakes >= self.penalty_value:
+                                self.disqualified_users.add(user.id)
+                                embed_disq = discord.Embed(
+                                    title="❌ プレイヤー失格",
+                                    description=f"**{user.display_name}** さんは {self.penalty_value} 回不正解となったため、**失格・脱落**となりました！",
+                                    color=discord.Color.red()
+                                )
+                                await self.interaction.channel.send(embed=embed_disq)
+                            else:
+                                await self.interaction.channel.send(f"⚠️ **{user.display_name}** さんはお手つきしました！ (お手つき回数: {current_mistakes}/{self.penalty_value})")
 
                         if len(self.allowed_users) > 0 and len(answered_users) >= len(self.allowed_users):
                             embed = discord.Embed(

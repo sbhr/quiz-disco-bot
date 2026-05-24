@@ -30,12 +30,25 @@ class FastestFingerView(discord.ui.View):
             await interaction.response.send_message("あなたは既に回答済みです！", ephemeral=True)
             return
 
+        # 失格のチェック
+        if interaction.user.id in self.session.disqualified_users:
+            await interaction.response.send_message("❌ あなたは失格となったため、回答できません。", ephemeral=True)
+            return
+
         # お手つきペナルティのチェック
         if interaction.user.id in self.session.frozen_users:
-            remaining = self.session.frozen_users[interaction.user.id] - time.time()
-            if remaining > 0:
-                await interaction.response.send_message(f"お手つきペナルティ中です！ あと {remaining:.1f} 秒待ってください。", ephemeral=True)
-                return
+            if self.session.penalty_type == "time":
+                remaining = self.session.frozen_users[interaction.user.id] - time.time()
+                if remaining > 0:
+                    await interaction.response.send_message(f"⌛ お手つきペナルティ中です！ あと {remaining:.1f} 秒待ってください。", ephemeral=True)
+                    return
+            elif self.session.penalty_type == "skip":
+                target_q = self.session.frozen_users[interaction.user.id]
+                current_q = self.session.questions_asked
+                if current_q <= target_q:
+                    remaining_qs = target_q - current_q + 1
+                    await interaction.response.send_message(f"⌛ お手つきペナルティ中です！ 次の {remaining_qs} 問回答できません (第 {target_q + 1} 問から復帰可能)。", ephemeral=True)
+                    return
 
         if self.pressed:
             await interaction.response.send_message("既に他の人が押しています！", ephemeral=True)
@@ -115,13 +128,14 @@ class RecruitView(discord.ui.View):
         await interaction.response.edit_message(content=f"**クイズ参加者募集！**\n以下のボタンで参加・辞退を選んでください。\n\n**現在の参加予定者 ({len(self.cog.registered_participants)}名):**\n{text}", view=self)
 
 class GenreSelectView(discord.ui.View):
-    def __init__(self, cog, original_interaction, rule, value, penalty, unique=True):
+    def __init__(self, cog, original_interaction, rule, value, penalty_type, penalty_value, unique=True):
         super().__init__(timeout=60)
         self.cog = cog
         self.original_interaction = original_interaction
         self.rule = rule
         self.value = value
-        self.penalty = penalty
+        self.penalty_type = penalty_type
+        self.penalty_value = penalty_value
         self.unique = unique
         
         genres = list(self.cog.question_store.questions_by_genre.keys())
@@ -147,7 +161,7 @@ class GenreSelectView(discord.ui.View):
             rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
             await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{genre}** で開始します...", view=self)
             
-            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre, self.penalty, self.unique)
+            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre, self.penalty_type, self.penalty_value, self.unique)
             
         return callback
 
@@ -217,24 +231,42 @@ class QuizCog(commands.Cog):
         await interaction.followup.send(f"🔊 ボイスチャンネル内の {unmuted_count} 名のサーバーミュートを解除しました。", ephemeral=True)
 
     @app_commands.command(name="quiz", description="早押しクイズを開始します")
-    @app_commands.describe(
-        rule="ルールの種類", 
-        value="問題数または目標ポイント", 
-        genre="出題するジャンル（省略するとボタンで選択）", 
-        penalty="不正解時の休み時間（秒、0でなし）",
-        unique="1回出た問題を出さないようにする（重複回避）か（デフォルト: True）"
+    @app_commands.rename(
+        rule="ルール",
+        value="設定値",
+        genre="ジャンル",
+        penalty_type="ペナルティの種類",
+        penalty_value="ペナルティの値",
+        unique="重複回避"
     )
-    @app_commands.choices(rule=[
-        app_commands.Choice(name="目標ポイント先取", value="first_to_n"),
-        app_commands.Choice(name="全N問", value="total_n")
-    ])
+    @app_commands.describe(
+        rule="ルールの種類（目標ポイント先取、または全N問）", 
+        value="目標ポイント、または出題する総問題数", 
+        genre="出題するジャンル（省略するとジャンル選択ボタンを表示）", 
+        penalty_type="お手つき（不正解）時のペナルティ形式",
+        penalty_value="ペナルティの数値（時間休みなら秒数、問題数休みなら休み問数、失格なら最大お手つき回数）",
+        unique="同じ問題を二度と出さないようにする（重複回避）か（デフォルト: True）"
+    )
+    @app_commands.choices(
+        rule=[
+            app_commands.Choice(name="目標ポイント先取", value="first_to_n"),
+            app_commands.Choice(name="全N問", value="total_n")
+        ],
+        penalty_type=[
+            app_commands.Choice(name="ペナルティなし", value="none"),
+            app_commands.Choice(name="時間休み（秒）", value="time"),
+            app_commands.Choice(name="問題数休み（問）", value="skip"),
+            app_commands.Choice(name="お手つき回数で失格", value="disqualify")
+        ]
+    )
     async def quiz_start(
         self, 
         interaction: discord.Interaction, 
         rule: str = "first_to_n", 
         value: int = 3, 
         genre: str = None, 
-        penalty: int = 0,
+        penalty_type: str = "none",
+        penalty_value: int = 0,
         unique: bool = True
     ):
         if self.current_quiz_active:
@@ -249,14 +281,14 @@ class QuizCog(commands.Cog):
         self.question_store.reload_questions()
 
         if genre is None:
-            view = GenreSelectView(self, interaction, rule, value, penalty, unique)
+            view = GenreSelectView(self, interaction, rule, value, penalty_type, penalty_value, unique)
             await interaction.response.send_message("出題するジャンルを選んでください：", view=view)
         else:
             await interaction.response.defer()
-            await self.start_quiz_session(interaction, rule, value, genre, penalty, unique)
+            await self.start_quiz_session(interaction, rule, value, genre, penalty_type, penalty_value, unique)
 
-    async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True):
-        self.current_session = QuizSession(self, interaction, rule, value, genre, penalty, unique, voice_answer=False)
+    async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty_type: str = "none", penalty_value: int = 0, unique: bool = True):
+        self.current_session = QuizSession(self, interaction, rule, value, genre, penalty_type, penalty_value, unique, voice_answer=False)
         self.current_quiz_active = True
         self.force_stop = False
         await self.current_session.run()
