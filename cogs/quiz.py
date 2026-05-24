@@ -197,6 +197,25 @@ class QuizCog(commands.Cog):
         
         await interaction.response.send_message(embed=embed)
 
+    @app_commands.command(name="unmute_all", description="ボイスチャンネル内の全員のミュートを強制解除します")
+    async def unmute_all(self, interaction: discord.Interaction):
+        if not interaction.user.voice or not interaction.user.voice.channel:
+            await interaction.response.send_message("ボイスチャンネルに参加してから実行してください。", ephemeral=True)
+            return
+
+        await interaction.response.defer(ephemeral=True)
+        vc = interaction.user.voice.channel
+        unmuted_count = 0
+        for member in vc.members:
+            if not member.bot and member.voice and member.voice.mute:
+                try:
+                    await member.edit(mute=False, reason="緊急ミュート解除")
+                    unmuted_count += 1
+                except Exception as e:
+                    print(f"Failed to unmute {member.name} in slash command: {e}")
+
+        await interaction.followup.send(f"🔊 ボイスチャンネル内の {unmuted_count} 名のサーバーミュートを解除しました。", ephemeral=True)
+
     @app_commands.command(name="quiz", description="早押しクイズを開始します")
     @app_commands.describe(
         rule="ルールの種類", 

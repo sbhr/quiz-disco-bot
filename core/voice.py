@@ -62,3 +62,28 @@ class VoiceManager:
                 os.remove(self.audio_file_path)
             except Exception:
                 pass
+
+    async def mute_all_except(self, channel: discord.VoiceChannel, exclude_member: discord.Member) -> list[discord.Member]:
+        """指定したユーザー以外のボイスチャンネルメンバーをミュートし、ミュートしたメンバーのリストを返します"""
+        muted = []
+        if not channel:
+            return muted
+        for member in channel.members:
+            if member.id != exclude_member.id and not member.bot:
+                if member.voice and not member.voice.mute:
+                    try:
+                        await member.edit(mute=True, reason="早押しクイズ解答中")
+                        muted.append(member)
+                    except Exception as e:
+                        print(f"Failed to mute {member.name} in VoiceManager: {e}")
+        return muted
+
+    async def unmute_members(self, members: list[discord.Member]):
+        """指定されたメンバーリストのミュートを解除します"""
+        for member in members:
+            try:
+                # メンバーがまだボイスチャンネルに残っており、かつミュート状態である場合のみ解除
+                if member.voice and member.voice.mute:
+                    await member.edit(mute=False, reason="早押しクイズ解答終了")
+            except Exception as e:
+                print(f"Failed to unmute {member.name} in VoiceManager: {e}")

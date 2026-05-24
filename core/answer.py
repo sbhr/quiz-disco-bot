@@ -64,10 +64,10 @@ class AnswerReceiver:
         except asyncio.TimeoutError:
             return None
 
-    async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0) -> str:
+    async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0, check_cancel=None) -> str:
         """
         ユーザーの音声を最大 timeout 秒間録音し、録音された一時ファイルパス (.wav) を返します。
-        話し終わったボタンが押された場合、早期に録音を終了してファイルパスを返します。
+        話し終わったボタンが押された場合、または外部キャンセルフラグが立った場合、早期に録音を終了してファイルパスを返します。
         """
         import discord_ext.voice_recv as voice_recv
 
@@ -91,7 +91,7 @@ class AnswerReceiver:
 
             # 0.1秒単位でポーリング監視
             for _ in range(int(timeout * 10)):
-                if view.done:
+                if view.done or (check_cancel and check_cancel()):
                     break
                 await asyncio.sleep(0.1)
         finally:

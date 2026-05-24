@@ -185,27 +185,21 @@ class QuizSession:
                 
                 if self.voice_answer:
                     # 音声回答モード
-                    muted_members = []
-                    # 1. 解答者以外のサーバーミュート処理
-                    for member in vc.members:
-                        if member.id != user.id and not member.bot:
-                            if member.voice and not member.voice.mute:
-                                try:
-                                    await member.edit(mute=True, reason="早押しクイズ解答中")
-                                    muted_members.append(member)
-                                except Exception as e:
-                                    print(f"Failed to mute {member.name}: {e}")
+                    # 1. 解答者以外のサーバーミュート処理 (VoiceManager へ移行)
+                    muted_members = await self.voice_manager.mute_all_except(vc, user)
 
                     try:
-                        # 2. 録音処理 (AnswerReceiver にカプセル化)
-                        temp_wav = await self.answer_receiver.wait_for_voice_answer(self.interaction.channel, voice_client, user, timeout=8.0)
+                        # 2. 録音処理 (AnswerReceiver にカプセル化、強制終了チェックを渡す)
+                        temp_wav = await self.answer_receiver.wait_for_voice_answer(
+                            self.interaction.channel, 
+                            voice_client, 
+                            user, 
+                            timeout=8.0,
+                            check_cancel=lambda: self.force_stop or self.cog.force_stop
+                        )
                     finally:
-                        # 3. サーバーミュート解除
-                        for member in muted_members:
-                            try:
-                                await member.edit(mute=False, reason="早押しクイズ解答終了")
-                            except Exception as e:
-                                print(f"Failed to unmute {member.name}: {e}")
+                        # 3. サーバーミュート解除 (VoiceManager へ移行)
+                        await self.voice_manager.unmute_members(muted_members)
 
                     # 4. 音声判定
                     if temp_wav:
