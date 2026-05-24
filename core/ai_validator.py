@@ -145,6 +145,11 @@ JSON形式のみで出力してください。
 """
 
         try:
+            # 録音ファイルが存在しない、またはサイズが極端に小さい（ヘッダーのみなど）場合は即座に無音/失敗判定
+            if not os.path.exists(audio_file_path) or os.path.getsize(audio_file_path) < 1000:
+                print(f"Warning: Voice file is empty, corrupted or too small ({audio_file_path})")
+                return "", False
+
             with open(audio_file_path, "rb") as f:
                 audio_bytes = f.read()
 

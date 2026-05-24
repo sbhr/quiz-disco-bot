@@ -69,7 +69,7 @@ class AnswerReceiver:
         ユーザーの音声を最大 timeout 秒間録音し、録音された一時ファイルパス (.wav) を返します。
         話し終わったボタンが押された場合、または外部キャンセルフラグが立った場合、早期に録音を終了してファイルパスを返します。
         """
-        import discord_ext.voice_recv as voice_recv
+        from discord.ext import voice_recv
 
         temp_wav = f"temp_voice_{user.id}.wav"
         if os.path.exists(temp_wav):
