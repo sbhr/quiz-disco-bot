@@ -103,6 +103,7 @@ class QuizSession:
                 
                 answered_users = set()
                 should_play_audio = True
+                is_repeat = False
                 
                 while True:
                     # 全員が不正解かどうか
@@ -127,7 +128,8 @@ class QuizSession:
                     if should_play_audio:
                         try:
                             self.question_start_time = time.time()
-                            await self.voice_manager.play_audio(voice_client, f"問題。{question_text}")
+                            await self.voice_manager.play_audio(voice_client, f"問題。{question_text}", use_local=is_repeat)
+                            is_repeat = True
                         except Exception as e:
                             await self.interaction.channel.send(f"音声の再生に失敗しました。({e})")
                             self.is_active = False

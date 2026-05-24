@@ -235,3 +235,9 @@ class QuestionStore:
         conn.commit()
         conn.close()
 
+    def reload_questions(self):
+        """Reload all questions from the data directory to pick up newly added or modified CSV files."""
+        self.questions_by_genre.clear()
+        self._load_questions()
+        print(f"[{self.__class__.__name__}] Reloaded questions from CSV files. Current genres: {list(self.questions_by_genre.keys())}")
+

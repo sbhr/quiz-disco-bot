@@ -248,6 +248,9 @@ class QuizCog(commands.Cog):
             await interaction.response.send_message("ボイスチャンネルに参加してから実行してください。", ephemeral=True)
             return
 
+        # ローカルのCSVファイルを再読み込みして、新規追加や更新を即座に反映
+        self.question_store.reload_questions()
+
         if genre is None:
             view = GenreSelectView(self, interaction, rule, value, penalty, unique, voice_answer)
             await interaction.response.send_message("出題するジャンルを選んでください：", view=view)
