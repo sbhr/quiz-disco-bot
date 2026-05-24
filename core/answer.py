@@ -39,6 +39,12 @@ class AnswerValidator:
         
         return is_correct
 
+    async def validate_voice(self, audio_file_path: str, correct_answer: str, question: str = "") -> tuple[str, bool]:
+        """
+        音声ファイルをAI判定器に渡し、文字起こし結果と正誤結果のタプルを返します。
+        """
+        return await self.ai_validator.validate_voice(audio_file_path, correct_answer, question)
+
 class AnswerReceiver:
     def __init__(self, bot):
         self.bot = bot

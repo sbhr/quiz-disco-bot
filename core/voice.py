@@ -3,6 +3,7 @@ import discord
 import edge_tts
 import asyncio
 from gtts import gTTS
+from discord.ext import voice_recv
 
 class VoiceManager:
     def __init__(self, bot):
@@ -23,7 +24,7 @@ class VoiceManager:
                 await voice_client.move_to(channel)
             return voice_client
         else:
-            return await channel.connect()
+            return await channel.connect(cls=voice_recv.VoiceRecvClient)
 
     async def leave_channel(self, guild: discord.Guild):
         """ボイスチャンネルから退出する"""

@@ -1,13 +1,14 @@
 import asyncio
 import discord
 import time
+import os
 from core.question import QuestionStore
 from core.score import ScoreManager
 from core.voice import VoiceManager
 from core.answer import AnswerReceiver, AnswerValidator
 
 class QuizSession:
-    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True):
+    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True, voice_answer: bool = False):
         self.cog = cog
         self.interaction = interaction
         self.rule = rule
@@ -15,6 +16,7 @@ class QuizSession:
         self.genre = genre
         self.penalty = penalty
         self.unique = unique
+        self.voice_answer = voice_answer
         
         # マネージャー類は Cog から参照
         self.voice_manager = cog.voice_manager
@@ -181,10 +183,71 @@ class QuizSession:
                 self.voice_manager.stop_audio(voice_client)
                 user = view.pressed_user
                 
-                await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ 10秒以内にテキストで解答を送信してください。")
-                
-                # 解答待ち
-                user_answer = await self.answer_receiver.wait_for_answer(self.interaction.channel, user, timeout=10.0)
+                if self.voice_answer:
+                    # 音声回答モード
+                    muted_members = []
+                    # 1. 解答者以外のサーバーミュート処理
+                    for member in vc.members:
+                        if member.id != user.id and not member.bot:
+                            if member.voice and not member.voice.mute:
+                                try:
+                                    await member.edit(mute=True, reason="早押しクイズ解答中")
+                                    muted_members.append(member)
+                                except Exception as e:
+                                    print(f"Failed to mute {member.name}: {e}")
+
+                    # 2. 録音処理
+                    await self.interaction.channel.send(f"🔔 **{user.display_name}** さん、音声で回答してください！ (5秒間録音します)")
+                    
+                    import discord_ext.voice_recv as voice_recv
+                    temp_wav = f"temp_voice_{user.id}.wav"
+                    if os.path.exists(temp_wav):
+                        try:
+                            os.remove(temp_wav)
+                        except Exception:
+                            pass
+                            
+                    try:
+                        sink = voice_recv.WaveSink(temp_wav)
+                        filtered_sink = voice_recv.UserFilter(sink, user)
+                        voice_client.listen(filtered_sink)
+                        
+                        await asyncio.sleep(5.0)
+                    finally:
+                        try:
+                            voice_client.stop_listening()
+                        except Exception:
+                            pass
+                            
+                        # 3. サーバーミュート解除
+                        for member in muted_members:
+                            try:
+                                await member.edit(mute=False, reason="早押しクイズ解答終了")
+                            except Exception as e:
+                                print(f"Failed to unmute {member.name}: {e}")
+
+                    # 4. 音声判定
+                    await self.interaction.channel.send("🎙️ 録音が終了しました。正誤判定中...")
+                    transcript, is_correct = await self.answer_validator.validate_voice(temp_wav, correct_answer, question_text)
+                    
+                    if os.path.exists(temp_wav):
+                        try:
+                            os.remove(temp_wav)
+                        except Exception:
+                            pass
+                            
+                    if transcript:
+                        await self.interaction.channel.send(f"🎙️ 聞き取り結果: **「{transcript}」**")
+                        user_answer = transcript
+                    else:
+                        await self.interaction.channel.send("🎙️ 音声が聞き取れませんでした。")
+                        user_answer = None
+                else:
+                    # テキスト解答モード
+                    await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ 10秒以内にテキストで解答を送信してください。")
+                    # 解答待ち
+                    user_answer = await self.answer_receiver.wait_for_answer(self.interaction.channel, user, timeout=10.0)
+                    is_correct = False # 後続で更新されるためダミー値
                 
                 if not user_answer:
                     answered_users.add(user.id)
@@ -195,7 +258,7 @@ class QuizSession:
                     if len(self.allowed_users) > 0 and len(answered_users) >= len(self.allowed_users):
                         embed = discord.Embed(
                             title="全員不正解",
-                            description=f"解答時間切れです！ 正解は **{correct_answer}** でした。",
+                            description=f"解答時間切れ（または聞き取り不可）です！ 正解は **{correct_answer}** でした。",
                             color=discord.Color.red()
                         )
                         embed.add_field(name="問題文", value=question_text, inline=False)
@@ -205,14 +268,16 @@ class QuizSession:
                         break
                         
                     if was_playing:
-                        await self.interaction.channel.send(f"解答時間切れです！\nもう一度問題を読み上げます...")
+                        await self.interaction.channel.send(f"解答時間切れ（または聞き取り不可）です！\nもう一度問題を読み上げます...")
                         should_play_audio = True
                     else:
-                        await self.interaction.channel.send(f"解答時間切れです！\n引き続き解答を受け付けます。")
+                        await self.interaction.channel.send(f"解答時間切れ（または聞き取り不可）です！\n引き続き解答を受け付けます。")
                         should_play_audio = False
                     continue
                 
-                is_correct = await self.answer_validator.validate(user_answer, correct_answer, question_text)
+                # 正誤判定 (テキスト解答モードの場合のみ実行)
+                if not self.voice_answer:
+                    is_correct = await self.answer_validator.validate(user_answer, correct_answer, question_text)
                 if is_correct:
                     self.score_manager.add_score(user.id, 1)
                     score = self.score_manager.get_score(user.id)
