@@ -196,29 +196,10 @@ class QuizSession:
                                 except Exception as e:
                                     print(f"Failed to mute {member.name}: {e}")
 
-                    # 2. 録音処理
-                    await self.interaction.channel.send(f"🔔 **{user.display_name}** さん、音声で回答してください！ (5秒間録音します)")
-                    
-                    import discord_ext.voice_recv as voice_recv
-                    temp_wav = f"temp_voice_{user.id}.wav"
-                    if os.path.exists(temp_wav):
-                        try:
-                            os.remove(temp_wav)
-                        except Exception:
-                            pass
-                            
                     try:
-                        sink = voice_recv.WaveSink(temp_wav)
-                        filtered_sink = voice_recv.UserFilter(sink, user)
-                        voice_client.listen(filtered_sink)
-                        
-                        await asyncio.sleep(5.0)
+                        # 2. 録音処理 (AnswerReceiver にカプセル化)
+                        temp_wav = await self.answer_receiver.wait_for_voice_answer(self.interaction.channel, voice_client, user, timeout=8.0)
                     finally:
-                        try:
-                            voice_client.stop_listening()
-                        except Exception:
-                            pass
-                            
                         # 3. サーバーミュート解除
                         for member in muted_members:
                             try:
@@ -227,20 +208,24 @@ class QuizSession:
                                 print(f"Failed to unmute {member.name}: {e}")
 
                     # 4. 音声判定
-                    await self.interaction.channel.send("🎙️ 録音が終了しました。正誤判定中...")
-                    transcript, is_correct = await self.answer_validator.validate_voice(temp_wav, correct_answer, question_text)
-                    
-                    if os.path.exists(temp_wav):
-                        try:
-                            os.remove(temp_wav)
-                        except Exception:
-                            pass
-                            
-                    if transcript:
-                        await self.interaction.channel.send(f"🎙️ 聞き取り結果: **「{transcript}」**")
-                        user_answer = transcript
+                    if temp_wav:
+                        await self.interaction.channel.send("🎙️ 録音が終了しました。正誤判定中...")
+                        transcript, is_correct = await self.answer_validator.validate_voice(temp_wav, correct_answer, question_text)
+                        
+                        if os.path.exists(temp_wav):
+                            try:
+                                os.remove(temp_wav)
+                            except Exception:
+                                pass
+                                
+                        if transcript:
+                            await self.interaction.channel.send(f"🎙️ 聞き取り結果: **「{transcript}」**")
+                            user_answer = transcript
+                        else:
+                            await self.interaction.channel.send("🎙️ 音声が聞き取れませんでした。")
+                            user_answer = None
                     else:
-                        await self.interaction.channel.send("🎙️ 音声が聞き取れませんでした。")
+                        await self.interaction.channel.send("🎙️ 録音データの生成に失敗しました。")
                         user_answer = None
                 else:
                     # テキスト解答モード

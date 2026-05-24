@@ -1,6 +1,7 @@
 from thefuzz import fuzz
 import discord
 import asyncio
+import os
 
 from core.ai_validator import AIAnswerValidator
 
@@ -62,3 +63,82 @@ class AnswerReceiver:
             return msg.content
         except asyncio.TimeoutError:
             return None
+
+    async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0) -> str:
+        """
+        ユーザーの音声を最大 timeout 秒間録音し、録音された一時ファイルパス (.wav) を返します。
+        話し終わったボタンが押された場合、早期に録音を終了してファイルパスを返します。
+        """
+        import discord_ext.voice_recv as voice_recv
+
+        temp_wav = f"temp_voice_{user.id}.wav"
+        if os.path.exists(temp_wav):
+            try:
+                os.remove(temp_wav)
+            except Exception:
+                pass
+
+        # 音声回答完了ボタン付きのViewを送信
+        view = VoiceAnswerDoneView(user, timeout=timeout)
+        msg_text = f"🔔 **{user.display_name}** さん、音声で回答してください！ (最大 {int(timeout)} 秒間録音します)\n話し終わったら下のボタンを押すか、そのままお待ちください。"
+        done_msg = await channel.send(msg_text, view=view)
+        view.message = done_msg
+
+        try:
+            sink = voice_recv.WaveSink(temp_wav)
+            filtered_sink = voice_recv.UserFilter(sink, user)
+            voice_client.listen(filtered_sink)
+
+            # 0.1秒単位でポーリング監視
+            for _ in range(int(timeout * 10)):
+                if view.done:
+                    break
+                await asyncio.sleep(0.1)
+        finally:
+            try:
+                voice_client.stop_listening()
+            except Exception:
+                pass
+
+            view.stop()
+            try:
+                for child in view.children:
+                    child.disabled = True
+                await done_msg.edit(view=view)
+            except Exception:
+                pass
+
+        return temp_wav if os.path.exists(temp_wav) else None
+
+class VoiceAnswerDoneView(discord.ui.View):
+    def __init__(self, user: discord.Member, timeout: float):
+        super().__init__(timeout=timeout)
+        self.user = user
+        self.done = False
+        self.message = None
+
+    @discord.ui.button(label="🎙️ 話し終わった / 解答を送信", style=discord.ButtonStyle.success, emoji="✅")
+    async def done_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if interaction.user.id != self.user.id:
+            await interaction.response.send_message("あなたには解答権がありません！", ephemeral=True)
+            return
+
+        self.done = True
+        button.disabled = True
+        button.label = "🎙️ 解答を送信しました"
+        button.style = discord.ButtonStyle.secondary
+        await interaction.response.edit_message(view=self)
+        self.stop()
+
+    async def on_timeout(self):
+        # タイムアウト時にボタンを無効化
+        if self.message:
+            try:
+                for child in self.children:
+                    child.disabled = True
+                    if isinstance(child, discord.ui.Button) and child.label == "🎙️ 話し終わった / 解答を送信":
+                        child.label = "🎙️ 時間切れ / 録音終了"
+                        child.style = discord.ButtonStyle.secondary
+                await self.message.edit(view=self)
+            except Exception:
+                pass
