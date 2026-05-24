@@ -115,7 +115,7 @@ class RecruitView(discord.ui.View):
         await interaction.response.edit_message(content=f"**クイズ参加者募集！**\n以下のボタンで参加・辞退を選んでください。\n\n**現在の参加予定者 ({len(self.cog.registered_participants)}名):**\n{text}", view=self)
 
 class GenreSelectView(discord.ui.View):
-    def __init__(self, cog, original_interaction, rule, value, penalty, unique=True, voice_answer=False):
+    def __init__(self, cog, original_interaction, rule, value, penalty, unique=True):
         super().__init__(timeout=60)
         self.cog = cog
         self.original_interaction = original_interaction
@@ -123,7 +123,6 @@ class GenreSelectView(discord.ui.View):
         self.value = value
         self.penalty = penalty
         self.unique = unique
-        self.voice_answer = voice_answer
         
         genres = list(self.cog.question_store.questions_by_genre.keys())
         genres = sorted(genres)
@@ -148,7 +147,7 @@ class GenreSelectView(discord.ui.View):
             rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
             await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{genre}** で開始します...", view=self)
             
-            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre, self.penalty, self.unique, self.voice_answer)
+            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre, self.penalty, self.unique)
             
         return callback
 
@@ -223,8 +222,7 @@ class QuizCog(commands.Cog):
         value="問題数または目標ポイント", 
         genre="出題するジャンル（省略するとボタンで選択）", 
         penalty="不正解時の休み時間（秒、0でなし）",
-        unique="1回出た問題を出さないようにする（重複回避）か（デフォルト: True）",
-        voice_answer="音声で回答するかどうか（デフォルト: False）"
+        unique="1回出た問題を出さないようにする（重複回避）か（デフォルト: True）"
     )
     @app_commands.choices(rule=[
         app_commands.Choice(name="目標ポイント先取", value="first_to_n"),
@@ -237,8 +235,7 @@ class QuizCog(commands.Cog):
         value: int = 3, 
         genre: str = None, 
         penalty: int = 0,
-        unique: bool = True,
-        voice_answer: bool = False
+        unique: bool = True
     ):
         if self.current_quiz_active:
             await interaction.response.send_message("既にクイズが進行中です！", ephemeral=True)
@@ -252,14 +249,14 @@ class QuizCog(commands.Cog):
         self.question_store.reload_questions()
 
         if genre is None:
-            view = GenreSelectView(self, interaction, rule, value, penalty, unique, voice_answer)
+            view = GenreSelectView(self, interaction, rule, value, penalty, unique)
             await interaction.response.send_message("出題するジャンルを選んでください：", view=view)
         else:
             await interaction.response.defer()
-            await self.start_quiz_session(interaction, rule, value, genre, penalty, unique, voice_answer)
+            await self.start_quiz_session(interaction, rule, value, genre, penalty, unique)
 
-    async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True, voice_answer: bool = False):
-        self.current_session = QuizSession(self, interaction, rule, value, genre, penalty, unique, voice_answer)
+    async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty: int = 0, unique: bool = True):
+        self.current_session = QuizSession(self, interaction, rule, value, genre, penalty, unique, voice_answer=False)
         self.current_quiz_active = True
         self.force_stop = False
         await self.current_session.run()
