@@ -384,6 +384,27 @@ class QuizSession:
                             embed.add_field(name="解説", value=explanation, inline=False)
                         
                         await self.interaction.channel.send(embed=embed)
+
+                        # N点先取でのリーチ（あと1点で優勝）時の演出と途中経過の得点表示
+                        if self.rule == "first_to_n" and score == self.value - 1:
+                            reach_embed = discord.Embed(
+                                title="🚨 リーチ！あと1点で優勝！",
+                                description=f"🏆 **{user.display_name}** さんが優勝まであと1ポイントとなりました！\n次の問題を正解すると勝利です！",
+                                color=discord.Color.red()
+                            )
+                            scores = self.score_manager.get_all_scores()
+                            sorted_scores = sorted(scores.items(), key=lambda x: x[1], reverse=True)
+                            ranking_text = ""
+                            medals = ["🥇", "🥈", "🥉"]
+                            for i, (uid, s) in enumerate(sorted_scores):
+                                medal = medals[i] if i < 3 else "🔹"
+                                ranking_text += f"{medal} <@{uid}> - {s} pts"
+                                if s == self.value - 1:
+                                    ranking_text += " ⚡ *REACH*"
+                                ranking_text += "\n"
+                            reach_embed.add_field(name="📊 現在の得点状況", value=ranking_text, inline=False)
+                            await self.interaction.channel.send(embed=reach_embed)
+
                         break
                     else:
                         answered_users.add(user.id)
