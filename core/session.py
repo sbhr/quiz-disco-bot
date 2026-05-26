@@ -113,6 +113,16 @@ class QuizSession:
             else:
                 await self.interaction.response.send_message(start_msg)
             
+            # ジャンルアナウンスを音声再生
+            speak_text = f"ジャンル、{genre_text}の{quiz_type_name}を開始します。"
+            try:
+                await self.voice_manager.play_audio(voice_client, speak_text, use_local=False)
+                while voice_client.is_playing() and not self.force_stop and not self.cog.force_stop:
+                    await asyncio.sleep(0.1)
+                await asyncio.sleep(1.0)  # 再生終了後の余韻
+            except Exception as e:
+                print(f"Failed to play genre announcement: {e}")
+            
             while self.is_active:
                 if self.force_stop or self.cog.force_stop:
                     await self.interaction.channel.send("クイズが強制終了されました。")
