@@ -2,10 +2,41 @@ import asyncio
 import discord
 import time
 import os
+import re
 from core.question import QuestionStore
 from core.score import ScoreManager
 from core.voice import VoiceManager
 from core.answer import AnswerReceiver, AnswerValidator
+
+def parse_youtube_start_time(url: str) -> int:
+    """YouTubeのURLから開始時間（秒数）を解析する"""
+    match = re.search(r'[?&](?:t|start)=([0-9hms]+)', url)
+    if not match:
+        return 0
+        
+    t_val = match.group(1)
+    
+    if t_val.isdigit():
+        return int(t_val)
+        
+    total_seconds = 0
+    current_num = ""
+    for char in t_val:
+        if char.isdigit():
+            current_num += char
+        elif char == 'h':
+            total_seconds += int(current_num) * 3600
+            current_num = ""
+        elif char == 'm':
+            total_seconds += int(current_num) * 60
+            current_num = ""
+        elif char == 's':
+            total_seconds += int(current_num)
+            current_num = ""
+    if current_num:
+        total_seconds += int(current_num)
+        
+    return total_seconds
 
 class QuizSession:
     def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty_type: str = "none", penalty_value: int = 0, unique: bool = True, voice_answer: bool = False):
@@ -18,6 +49,7 @@ class QuizSession:
         self.penalty_value = penalty_value
         self.unique = unique
         self.voice_answer = voice_answer
+        self.is_intro_quiz = False
         
         # マネージャー類は Cog から参照
         self.voice_manager = cog.voice_manager
@@ -74,7 +106,8 @@ class QuizSession:
             else:
                 penalty_text = ""
             
-            start_msg = f"🎮 **クイズセッション開始！** (ルール: {rule_text} / ジャンル: {genre_text}{penalty_text})"
+            quiz_type_name = "イントロクイズ" if getattr(self, 'is_intro_quiz', False) else "クイズ"
+            start_msg = f"🎮 **{quiz_type_name}セッション開始！** (ルール: {rule_text} / ジャンル: {genre_text}{penalty_text})"
             if self.interaction.response.is_done():
                 await self.interaction.followup.send(start_msg)
             else:
@@ -103,10 +136,16 @@ class QuizSession:
                 correct_answer = question_data.get('answer', '')
                 explanation = question_data.get('explanation', '')
 
+                is_intro = getattr(self, 'is_intro_quiz', False)
+                embed_color = discord.Color.purple() if is_intro else discord.Color.blue()
+                embed_desc = "**音楽を再生します...**\n\n分かったら下のボタンを押し、10秒以内にチャットで答えてください。" if is_intro else (
+                    "**問題を読み上げます...**\n\n分かったら下のボタンを押し、音声またはチャットで解答してください。" if self.voice_answer else "**問題を読み上げます...**\n\n分かったら下のボタンを押し、10秒以内にチャットで答えてください。"
+                )
+                
                 embed = discord.Embed(
                     title=f"第 {self.questions_asked} 問",
-                    description=f"**問題を読み上げます...**\n\n分かったら下のボタンを押し、音声またはチャットで解答してください。" if self.voice_answer else f"**問題を読み上げます...**\n\n分かったら下のボタンを押し、10秒以内にチャットで答えてください。",
-                    color=discord.Color.blue()
+                    description=embed_desc,
+                    color=embed_color
                 )
                 embed.add_field(name="ジャンル", value=genre_text, inline=True)
                 embed.add_field(name="現在の状況", value=f"進行中: {self.questions_asked}問目", inline=True)
@@ -159,7 +198,11 @@ class QuizSession:
                     if should_play_audio:
                         try:
                             self.question_start_time = time.time()
-                            await self.voice_manager.play_audio(voice_client, f"問題。{question_text}", use_local=is_repeat)
+                            if getattr(self, 'is_intro_quiz', False):
+                                start_time = parse_youtube_start_time(question_text)
+                                await self.voice_manager.play_youtube(voice_client, question_text, start_time)
+                            else:
+                                await self.voice_manager.play_audio(voice_client, f"問題。{question_text}", use_local=is_repeat)
                             is_repeat = True
                         except Exception as e:
                             await self.interaction.channel.send(f"音声の再生に失敗しました。({e})")
@@ -167,8 +210,12 @@ class QuizSession:
                             return
                     
                     # ボタン押し待ち
+                    max_play_time = 20.0 if getattr(self, 'is_intro_quiz', False) else 9999.0
+                    start_wait = time.time()
                     while voice_client.is_playing() and not self.force_stop and not self.cog.force_stop:
                         if view.pressed_user or view.all_done:
+                            break
+                        if time.time() - start_wait > max_play_time:
                             break
                         await asyncio.sleep(0.1)
                     
@@ -209,7 +256,8 @@ class QuizSession:
                             description=f"正解は **{correct_answer}** でした。",
                             color=discord.Color.light_grey()
                         )
-                        embed.add_field(name="問題文", value=question_text, inline=False)
+                        q_field_name = "音源 URL" if getattr(self, 'is_intro_quiz', False) else "問題文"
+                        embed.add_field(name=q_field_name, value=question_text, inline=False)
                         if explanation:
                             embed.add_field(name="解説", value=explanation)
                         await self.interaction.channel.send(embed=embed)
@@ -268,9 +316,9 @@ class QuizSession:
                             user_answer = None
                     else:
                         # テキスト解答モード
-                        await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ (早押しタイム: **{elapsed_ms}ms**)\n10秒以内にテキストで解答を送信してください。")
+                        prompt_msg = await self.interaction.channel.send(f"🔔 **{user.display_name}** さんが押しました！ (早押しタイム: **{elapsed_ms}ms**)\n10秒以内にテキストで解答を送信してください。")
                         # 解答待ち
-                        user_answer = await self.answer_receiver.wait_for_answer(self.interaction.channel, user, timeout=10.0)
+                        user_answer = await self.answer_receiver.wait_for_answer(self.interaction.channel, user, timeout=10.0, prompt_msg=prompt_msg)
                         is_correct = False # 後続で更新されるためダミー値
                     
                     if not user_answer:
@@ -300,7 +348,8 @@ class QuizSession:
                                 description=f"解答時間切れ（または聞き取り不可）です！ 正解は **{correct_answer}** でした。",
                                 color=discord.Color.red()
                             )
-                            embed.add_field(name="問題文", value=question_text, inline=False)
+                            q_field_name = "音源 URL" if getattr(self, 'is_intro_quiz', False) else "問題文"
+                            embed.add_field(name=q_field_name, value=question_text, inline=False)
                             if explanation:
                                 embed.add_field(name="解説", value=explanation)
                             await self.interaction.channel.send(embed=embed)
@@ -327,7 +376,8 @@ class QuizSession:
                             description=f"**{user.display_name}** さん、お見事！\n\n正解: **{correct_answer}**",
                             color=discord.Color.green()
                         )
-                        embed.add_field(name="問題文", value=question_text, inline=False)
+                        q_field_name = "音源 URL" if getattr(self, 'is_intro_quiz', False) else "問題文"
+                        embed.add_field(name=q_field_name, value=question_text, inline=False)
                         embed.add_field(name="獲得ポイント", value="1 pt", inline=True)
                         embed.add_field(name="現在の合計", value=f"{score} pts", inline=True)
                         if explanation:
@@ -352,7 +402,7 @@ class QuizSession:
                                     description=f"**{user.display_name}** さんは {self.penalty_value} 回不正解となったため、**失格・脱落**となりました！",
                                     color=discord.Color.red()
                                 )
-                                await self.interaction.channel.send(embed=embed_disq)
+                                await self.interaction.channel.send(embed_disq)
                             else:
                                 await self.interaction.channel.send(f"⚠️ **{user.display_name}** さんはお手つきしました！ (お手つき回数: {current_mistakes}/{self.penalty_value})")
 
@@ -443,3 +493,9 @@ class QuizSession:
             # セッションのクリーンアップ
             self.is_active = False
             await self.cog.end_quiz_session(self.interaction)
+
+class IntroQuizSession(QuizSession):
+    def __init__(self, cog, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty_type: str = "none", penalty_value: int = 0, unique: bool = True):
+        super().__init__(cog, interaction, rule, value, genre, penalty_type, penalty_value, unique, voice_answer=False)
+        self.is_intro_quiz = True
+        self.question_store = cog.intro_question_store

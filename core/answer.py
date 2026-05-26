@@ -50,7 +50,7 @@ class AnswerReceiver:
     def __init__(self, bot):
         self.bot = bot
 
-    async def wait_for_answer(self, channel: discord.TextChannel, user: discord.Member, timeout: float = 10.0) -> str:
+    async def wait_for_answer(self, channel: discord.TextChannel, user: discord.Member, timeout: float = 10.0, prompt_msg: discord.Message = None) -> str:
         """
         Wait for a text answer from a specific user in a specific channel.
         In the future, this could be extended to wait for an audio transcript.
@@ -58,11 +58,44 @@ class AnswerReceiver:
         def check(m: discord.Message):
             return m.author == user and m.channel == channel
 
+        if prompt_msg is None:
+            try:
+                msg = await self.bot.wait_for('message', check=check, timeout=timeout)
+                return msg.content
+            except asyncio.TimeoutError:
+                return None
+
+        # prompt_msg is provided. Start countdown concurrently.
+        base_content = prompt_msg.content.rsplit("\n⌛ **残り", 1)[0]
+
+        async def run_countdown():
+            try:
+                for i in range(int(timeout), 0, -1):
+                    try:
+                        await prompt_msg.edit(content=f"{base_content}\n⌛ **残り {i} 秒**")
+                    except discord.errors.NotFound:
+                        break
+                    except Exception as e:
+                        print(f"Error editing countdown message: {e}")
+                    
+                    # Sleep 1 second in 0.1s steps to react faster to cancellation/answer
+                    for _ in range(10):
+                        await asyncio.sleep(0.1)
+            except asyncio.CancelledError:
+                pass
+
+        countdown = asyncio.create_task(run_countdown())
         try:
             msg = await self.bot.wait_for('message', check=check, timeout=timeout)
             return msg.content
         except asyncio.TimeoutError:
             return None
+        finally:
+            countdown.cancel()
+            try:
+                await prompt_msg.edit(content=base_content)
+            except Exception:
+                pass
 
     async def wait_for_voice_answer(self, channel: discord.TextChannel, voice_client, user: discord.Member, timeout: float = 8.0, check_cancel=None, elapsed_ms=None) -> str:
         """
@@ -90,10 +123,19 @@ class AnswerReceiver:
             filtered_sink = voice_recv.UserFilter(sink, user)
             voice_client.listen(filtered_sink)
 
-            # 0.1秒単位でポーリング監視
-            for _ in range(int(timeout * 10)):
+            # 0.1秒単位でポーリング監視しながら、残り秒数をカウントダウンする
+            last_remaining = int(timeout)
+            for step in range(int(timeout * 10)):
                 if view.done or (check_cancel and check_cancel()):
                     break
+                
+                remaining = int(timeout - (step / 10))
+                if remaining != last_remaining:
+                    last_remaining = remaining
+                    try:
+                        await done_msg.edit(content=f"{msg_text}\n⌛ **残り {remaining} 秒**")
+                    except Exception:
+                        pass
                 await asyncio.sleep(0.1)
         finally:
             try:
@@ -105,7 +147,7 @@ class AnswerReceiver:
             try:
                 for child in view.children:
                     child.disabled = True
-                await done_msg.edit(view=view)
+                await done_msg.edit(content=msg_text, view=view)
             except Exception:
                 pass
 

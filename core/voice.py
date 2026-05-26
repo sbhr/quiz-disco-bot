@@ -53,6 +53,49 @@ class VoiceManager:
         audio_source = discord.FFmpegPCMAudio(self.audio_file_path)
         voice_client.play(audio_source)
 
+    async def play_youtube(self, voice_client: discord.VoiceClient, url: str, start_time: int = 0):
+        """YouTube の音源を指定された秒数からストリーミング再生する"""
+        import yt_dlp
+        
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'quiet': True,
+            'no_warnings': True,
+            'skip_download': True,
+        }
+        
+        loop = asyncio.get_event_loop()
+        
+        def extract():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=False)
+                if 'entries' in info:
+                    info = info['entries'][0]
+                return info.get('url')
+                
+        try:
+            stream_url = await loop.run_in_executor(None, extract)
+        except Exception as e:
+            print(f"Failed to extract stream URL from YouTube: {e}")
+            raise e
+            
+        if not stream_url:
+            raise ValueError("Could not extract stream URL from YouTube.")
+            
+        if voice_client.is_playing():
+            voice_client.stop()
+            
+        before_options = f"-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -ss {start_time}"
+        options = "-vn"
+        
+        audio_source = discord.FFmpegPCMAudio(
+            stream_url,
+            before_options=before_options,
+            options=options
+        )
+        
+        voice_client.play(audio_source)
+
     def stop_audio(self, voice_client: discord.VoiceClient):
         """再生中の音声を停止する"""
         if voice_client and voice_client.is_playing():

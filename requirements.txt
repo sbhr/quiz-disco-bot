@@ -5,3 +5,4 @@ thefuzz
 python-Levenshtein
 google-genai
 discord-ext-voice-recv
+yt-dlp
