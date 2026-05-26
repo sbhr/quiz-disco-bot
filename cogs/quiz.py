@@ -127,6 +127,36 @@ class RecruitView(discord.ui.View):
         text = self.get_participants_text(interaction.guild)
         await interaction.response.edit_message(content=f"**クイズ参加者募集！**\n以下のボタンで参加・辞退を選んでください。\n\n**現在の参加予定者 ({len(self.cog.registered_participants)}名):**\n{text}", view=self)
 
+class GenreSelect(discord.ui.Select):
+    def __init__(self, view, placeholder, genres):
+        self.genre_view = view
+        options = [discord.SelectOption(label=g, value=g) for g in genres]
+        super().__init__(placeholder=placeholder, min_values=1, max_values=1, options=options)
+
+    async def callback(self, interaction: discord.Interaction):
+        if interaction.user.id != self.genre_view.original_interaction.user.id:
+            await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
+            return
+
+        genre = self.values[0]
+        for item in self.genre_view.children:
+            item.disabled = True
+        
+        rule_text = f"{self.genre_view.value} ポイント先取" if self.genre_view.rule == "first_to_n" else f"全 {self.genre_view.value} 問"
+        prefix = "イントロクイズ - " if self.genre_view.is_intro else ""
+        await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{prefix}{genre}** で開始します...", view=self.genre_view)
+        
+        await self.genre_view.cog.start_quiz_session(
+            interaction, 
+            self.genre_view.rule, 
+            self.genre_view.value, 
+            genre, 
+            self.genre_view.penalty_type, 
+            self.genre_view.penalty_value, 
+            self.genre_view.unique, 
+            is_intro=self.genre_view.is_intro
+        )
+
 class GenreSelectView(discord.ui.View):
     def __init__(self, cog, original_interaction, rule, value, penalty_type, penalty_value, unique=True, is_intro=False):
         super().__init__(timeout=60)
@@ -143,17 +173,23 @@ class GenreSelectView(discord.ui.View):
         genres = list(store.questions_by_genre.keys())
         genres = sorted(genres)
         
-        for genre_name in genres[:24]:
-            button = discord.ui.Button(label=genre_name, style=discord.ButtonStyle.primary)
-            button.callback = self.create_callback(genre_name)
-            self.add_item(button)
-            
+        # Split genres into chunks of 25
+        chunk_size = 25
+        if len(genres) <= chunk_size:
+            select = GenreSelect(self, "出題するジャンルを選んでください", genres)
+            self.add_item(select)
+        else:
+            for i in range(0, len(genres), chunk_size):
+                chunk = genres[i:i+chunk_size]
+                start_num = i + 1
+                end_num = min(i + chunk_size, len(genres))
+                placeholder = f"ジャンル一覧 ({start_num}〜{end_num}番目) から選ぶ"
+                select = GenreSelect(self, placeholder, chunk)
+                self.add_item(select)
+                
         all_button = discord.ui.Button(label="すべて", style=discord.ButtonStyle.success)
-        all_button.callback = self.create_callback("all")
-        self.add_item(all_button)
-
-    def create_callback(self, genre):
-        async def callback(interaction: discord.Interaction):
+        
+        async def all_callback(interaction: discord.Interaction):
             if interaction.user.id != self.original_interaction.user.id:
                 await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
                 return
@@ -162,11 +198,12 @@ class GenreSelectView(discord.ui.View):
                 item.disabled = True
             rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
             prefix = "イントロクイズ - " if self.is_intro else ""
-            await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{prefix}{genre}** で開始します...", view=self)
+            await interaction.response.edit_message(content=f"ルール: **{rule_text}** / ジャンル **{prefix}すべて** で開始します...", view=self)
             
-            await self.cog.start_quiz_session(interaction, self.rule, self.value, genre, self.penalty_type, self.penalty_value, self.unique, is_intro=self.is_intro)
-            
-        return callback
+            await self.cog.start_quiz_session(interaction, self.rule, self.value, "all", self.penalty_type, self.penalty_value, self.unique, is_intro=self.is_intro)
+
+        all_button.callback = all_callback
+        self.add_item(all_button)
 
 class QuizCog(commands.Cog):
     def __init__(self, bot):
