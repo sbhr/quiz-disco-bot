@@ -47,4 +47,7 @@ data/*.csv
 logs/
 
 # Database files
-quiz.db
+*.db
+
+# Intro data files
+data/intro/
