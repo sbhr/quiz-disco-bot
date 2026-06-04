@@ -2,6 +2,7 @@ from thefuzz import fuzz
 import discord
 import asyncio
 import os
+import time
 
 from core.ai_validator import AIAnswerValidator
 
@@ -70,17 +71,25 @@ class AnswerReceiver:
 
         async def run_countdown():
             try:
-                for i in range(int(timeout), 0, -1):
-                    try:
-                        await prompt_msg.edit(content=f"{base_content}\n⌛ **残り {i} 秒**")
-                    except discord.errors.NotFound:
-                        break
-                    except Exception as e:
-                        print(f"Error editing countdown message: {e}")
+                start_time = time.time()
+                last_sec = int(timeout)
+                while True:
+                    elapsed = time.time() - start_time
+                    remain = int(timeout - elapsed)
                     
-                    # Sleep 1 second in 0.1s steps to react faster to cancellation/answer
-                    for _ in range(10):
-                        await asyncio.sleep(0.1)
+                    if remain <= 0:
+                        break
+                        
+                    if remain != last_sec:
+                        last_sec = remain
+                        try:
+                            await prompt_msg.edit(content=f"{base_content}\n⌛ **残り {remain} 秒**")
+                        except discord.errors.NotFound:
+                            break
+                        except Exception as e:
+                            print(f"Error editing countdown message: {e}")
+                            
+                    await asyncio.sleep(0.1)
             except asyncio.CancelledError:
                 pass
 
@@ -123,13 +132,18 @@ class AnswerReceiver:
             filtered_sink = voice_recv.UserFilter(sink, user)
             voice_client.listen(filtered_sink)
 
-            # 0.1秒単位でポーリング監視しながら、残り秒数をカウントダウンする
+            start_time = time.time()
             last_remaining = int(timeout)
-            for step in range(int(timeout * 10)):
+            
+            while True:
                 if view.done or (check_cancel and check_cancel()):
                     break
-                
-                remaining = int(timeout - (step / 10))
+                    
+                elapsed = time.time() - start_time
+                remaining = int(timeout - elapsed)
+                if remaining <= 0:
+                    break
+                    
                 if remaining != last_remaining:
                     last_remaining = remaining
                     try:

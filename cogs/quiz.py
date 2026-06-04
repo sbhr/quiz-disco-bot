@@ -146,6 +146,21 @@ class GenreSelectView(discord.ui.View):
         
         self.update_items()
 
+    def get_settings_text(self):
+        rule_text = f"{self.value} ポイント先取" if self.rule == "first_to_n" else f"全 {self.value} 問"
+        if self.penalty_type == "none":
+            penalty_text = "なし"
+        elif self.penalty_type == "time":
+            penalty_text = f"{self.penalty_value}秒休み"
+        elif self.penalty_type == "skip":
+            penalty_text = f"次の{self.penalty_value}問休み"
+        elif self.penalty_type == "disqualify":
+            penalty_text = f"{self.penalty_value}回で失格"
+        else:
+            penalty_text = "なし"
+        unique_text = "する" if self.unique else "しない"
+        return f"💡 現在の設定\nルール: **{rule_text}** | ペナルティ: **{penalty_text}** | 重複回避: **{unique_text}**"
+
     def update_items(self):
         self.clear_items()
         
@@ -177,11 +192,26 @@ class GenreSelectView(discord.ui.View):
         all_button.callback = self.create_genre_callback("all")
         self.add_item(all_button)
 
+        # Add "前回の設定を復元" button
+        if getattr(self.cog, 'last_settings', None):
+            restore_button = discord.ui.Button(label="前回の設定を復元", style=discord.ButtonStyle.secondary, emoji="🔄", row=4)
+            restore_button.callback = self.restore_settings
+            self.add_item(restore_button)
+
+    async def restore_settings(self, interaction: discord.Interaction):
+        prev = self.cog.last_settings
+        self.rule = prev.get("rule", self.rule)
+        self.value = prev.get("value", self.value)
+        self.penalty_type = prev.get("penalty_type", self.penalty_type)
+        self.penalty_value = prev.get("penalty_value", self.penalty_value)
+        self.unique = prev.get("unique", self.unique)
+        
+        total_pages = (len(self.genres) + self.items_per_page - 1) // self.items_per_page
+        content = f"{self.get_settings_text()}\n\n出題するジャンルを選んでください (ページ {self.page + 1}/{total_pages})："
+        await interaction.response.edit_message(content=content, view=self)
+
     def create_genre_callback(self, genre):
         async def callback(interaction: discord.Interaction):
-            if interaction.user.id != self.original_interaction.user.id:
-                await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
-                return
             
             for item in self.children:
                 item.disabled = True
@@ -194,23 +224,17 @@ class GenreSelectView(discord.ui.View):
         return callback
 
     async def prev_page(self, interaction: discord.Interaction):
-        if interaction.user.id != self.original_interaction.user.id:
-            await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
-            return
         self.page -= 1
         self.update_items()
         total_pages = (len(self.genres) + self.items_per_page - 1) // self.items_per_page
-        content = f"出題するジャンルを選んでください (ページ {self.page + 1}/{total_pages})："
+        content = f"{self.get_settings_text()}\n\n出題するジャンルを選んでください (ページ {self.page + 1}/{total_pages})："
         await interaction.response.edit_message(content=content, view=self)
 
     async def next_page(self, interaction: discord.Interaction):
-        if interaction.user.id != self.original_interaction.user.id:
-            await interaction.response.send_message("コマンドを実行した本人しか操作できません。", ephemeral=True)
-            return
         self.page += 1
         self.update_items()
         total_pages = (len(self.genres) + self.items_per_page - 1) // self.items_per_page
-        content = f"出題するジャンルを選んでください (ページ {self.page + 1}/{total_pages})："
+        content = f"{self.get_settings_text()}\n\n出題するジャンルを選んでください (ページ {self.page + 1}/{total_pages})："
         await interaction.response.edit_message(content=content, view=self)
 
 class QuizCog(commands.Cog):
@@ -226,6 +250,7 @@ class QuizCog(commands.Cog):
         self.current_quiz_active = False
         self.force_stop = False
         self.registered_participants = set()
+        self.last_settings = None
         self.current_session = None
 
     @app_commands.command(name="recruit", description="クイズの参加者を募集するパネルを表示します")
@@ -331,7 +356,7 @@ class QuizCog(commands.Cog):
 
         if genre is None:
             view = GenreSelectView(self, interaction, rule, value, penalty_type, penalty_value, unique)
-            await interaction.response.send_message("出題するジャンルを選んでください：", view=view)
+            await interaction.response.send_message(f"{view.get_settings_text()}\n\n出題するジャンルを選んでください：", view=view)
         else:
             await interaction.response.defer()
             await self.start_quiz_session(interaction, rule, value, genre, penalty_type, penalty_value, unique)
@@ -388,12 +413,19 @@ class QuizCog(commands.Cog):
 
         if genre is None:
             view = GenreSelectView(self, interaction, rule, value, penalty_type, penalty_value, unique, is_intro=True)
-            await interaction.response.send_message("出題するイントロクイズのジャンルを選んでください：", view=view)
+            await interaction.response.send_message(f"{view.get_settings_text()}\n\n出題するイントロクイズのジャンルを選んでください：", view=view)
         else:
             await interaction.response.defer()
             await self.start_quiz_session(interaction, rule, value, genre, penalty_type, penalty_value, unique, is_intro=True)
 
     async def start_quiz_session(self, interaction: discord.Interaction, rule: str, value: int, genre: str, penalty_type: str = "none", penalty_value: int = 0, unique: bool = True, is_intro: bool = False):
+        self.last_settings = {
+            "rule": rule,
+            "value": value,
+            "penalty_type": penalty_type,
+            "penalty_value": penalty_value,
+            "unique": unique
+        }
         if is_intro:
             self.current_session = IntroQuizSession(self, interaction, rule, value, genre, penalty_type, penalty_value, unique)
         else:

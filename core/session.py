@@ -232,20 +232,28 @@ class QuizSession:
                     # タイムアウトカウントダウン
                     timeout_triggered = False
                     if not view.pressed_user and not view.all_done and not self.force_stop and not self.cog.force_stop:
-                        for i in range(7, 0, -1):
+                        start_time = time.time()
+                        last_remaining = 7
+                        while True:
                             if view.pressed_user or view.all_done or self.force_stop or self.cog.force_stop:
                                 break
-                            try:
-                                await msg.edit(content=f"分かったら早押しボタンを押してください！ (残り {i} 秒)")
-                            except discord.errors.NotFound:
+                                
+                            elapsed = time.time() - start_time
+                            remaining = int(7 - elapsed)
+                            if remaining <= 0:
+                                if not view.pressed_user:
+                                    timeout_triggered = True
                                 break
-                            for _ in range(10):
-                                if view.pressed_user or self.force_stop or self.cog.force_stop:
+                                
+                            if remaining != last_remaining:
+                                last_remaining = remaining
+                                try:
+                                    await msg.edit(content=f"分かったら早押しボタンを押してください！ (残り {remaining} 秒)")
+                                except discord.errors.NotFound:
                                     break
-                                await asyncio.sleep(0.1)
-                        else:
-                            if not view.pressed_user:
-                                timeout_triggered = True
+                                except Exception:
+                                    pass
+                            await asyncio.sleep(0.1)
 
                     if self.force_stop or self.cog.force_stop:
                         break
